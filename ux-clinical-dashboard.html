@@ -1,0 +1,1564 @@
+<meta charset="utf-8">
+<title>threep.io Clinician Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   TOKENS · Clinical Calm, turquoise revision
+   Neutrals carry a teal bias so the ground and the accent read as one family.
+   Green is gone: with a turquoise accent, "interactive" and "everything is
+   fine" would sit adjacent on the wheel, and in a clinical UI they must not be
+   confusable. Finished things are neutral, which is what tier 3 already said.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root{
+  /* teal-biased neutral ramp */
+  --n-0:#ffffff;  --n-25:#f8fbfb; --n-50:#f2f7f7; --n-100:#e9f0f0; --n-200:#d8e4e4;
+  --n-300:#b8c9c9; --n-400:#8fa4a4; --n-500:#5c7272; --n-600:#4a5e5e; --n-700:#354747;
+  --n-800:#1f2e2e; --n-900:#0d1a1a; --n-950:#050f0f; --n-980:#020808;
+
+  /* turquoise ramp */
+  --t-100:#ccfbf1; --t-200:#99f6e4; --t-300:#5eead4; --t-400:#2dd4bf;
+  --t-500:#14b8a6; --t-600:#0d9488; --t-700:#0f766e; --t-800:#115e59;
+  --c-300:#67e8f9; --c-400:#22d3ee; --c-600:#0891b2; --c-700:#0e7490;
+
+  --r-400:#f87171; --r-500:#ef4444; --r-600:#dc2626; --r-700:#b91c1c; --r-rose:#e11d48;
+  --a-300:#fcd34d; --a-400:#fbbf24; --a-600:#d97706; --a-800:#92400e;
+
+  --font-sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+
+  --t-2xs:.6875rem; --t-xs:.75rem; --t-sm:.8125rem; --t-base:.9375rem;
+  --t-md:1.0625rem; --t-lg:1.25rem; --t-xl:1.5rem; --t-2xl:2rem;
+  --t-display:clamp(2.75rem, 2rem + 3.6vw, 4.5rem);
+
+  --s-1:.25rem; --s-2:.5rem; --s-3:.75rem; --s-4:1rem; --s-5:1.25rem; --s-6:1.5rem;
+  --s-8:2rem; --s-10:2.5rem; --s-12:3rem; --s-16:4rem; --s-20:5rem; --s-24:6rem;
+  --gutter:clamp(1.5rem,5vw,4.5rem);
+  --rhythm:clamp(4.5rem,9vw,8rem);
+
+  --r-xs:0; --r-sm:0; --r-md:0; --r-lg:0; --r-full:999px;
+  --ease:cubic-bezier(.16,1,.3,1);
+
+  color-scheme:light;
+  --bg:var(--n-0); --surface:var(--n-0); --sunken:var(--n-50); --inset:var(--n-25);
+  --fg:var(--n-900); --fg-2:var(--n-700); --fg-3:var(--n-600); --fg-4:var(--n-500);
+  --fg-inv:var(--n-0);
+  --line:var(--n-200); --line-soft:var(--n-100); --line-strong:var(--n-300);
+
+  /* Two accent gradients, and the split is a rule, not a convenience.
+     --grad is contrast-budgeted: both stops clear AA against white labels.
+     --grad-bright is decorative only: hairlines, dots, rules. Never behind text. */
+  --grad:linear-gradient(100deg,var(--t-700) 0%,var(--c-700) 100%);
+  --grad-bright:linear-gradient(100deg,var(--t-500) 0%,var(--c-400) 100%);
+  /* The card ramp is lighter and travels further: three stops, measured at
+     4.58 / 4.73 / 4.55 : 1 against white. 4.55 is the ceiling: teal-600 is the
+     prettier stop and lands at 3.74, so it is out. Like the danger gradient,
+     this one is NOT re-pointed in dark, so it carries white text in both themes. */
+  --grad-card:linear-gradient(125deg,#0b8478 0%,#0a7f8e 45%,#0a80a1 100%);
+  --accent:var(--t-700); --accent-fg:var(--t-800); --accent-on:var(--n-0);
+  --accent-soft:rgba(15,118,110,.08); --accent-line:rgba(15,118,110,.28);
+
+  --danger-grad:linear-gradient(100deg,var(--r-700) 0%,var(--r-600) 55%,var(--r-rose) 100%);
+  --danger:var(--r-600); --danger-fg:var(--r-700); --danger-on:#fff;
+  --danger-soft:rgba(220,38,38,.07); --danger-line:rgba(220,38,38,.26);
+
+  --warn:var(--a-600); --warn-fg:var(--a-800);
+  --warn-soft:rgba(217,119,6,.09); --warn-line:rgba(217,119,6,.3);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:var(--n-980); --surface:var(--n-950); --sunken:var(--n-900); --inset:var(--n-900);
+    --fg:var(--n-50); --fg-2:#c3d3d3; --fg-3:#9fb2b2; --fg-4:var(--n-400); --fg-inv:var(--n-980);
+    --line:rgba(255,255,255,.09); --line-soft:rgba(255,255,255,.05); --line-strong:rgba(255,255,255,.17);
+    --grad:linear-gradient(100deg,var(--t-300) 0%,var(--c-300) 100%);
+    --grad-bright:linear-gradient(100deg,var(--t-400) 0%,var(--c-400) 100%);
+    --accent:var(--t-300); --accent-fg:var(--t-300); --accent-on:var(--n-950);
+    --accent-soft:rgba(94,234,212,.11); --accent-line:rgba(94,234,212,.32);
+    /* the danger gradient is NOT lightened. The surface that hands a clinician
+       an urgent review does not get to fail AA because it looked better on a
+       dark page. */
+    --danger:var(--r-500); --danger-fg:var(--r-400);
+    --danger-soft:rgba(248,113,113,.11); --danger-line:rgba(248,113,113,.3);
+    --warn:var(--a-400); --warn-fg:var(--a-300);
+    --warn-soft:rgba(251,191,36,.1); --warn-line:rgba(251,191,36,.3);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:var(--n-980); --surface:var(--n-950); --sunken:var(--n-900); --inset:var(--n-900);
+  --fg:var(--n-50); --fg-2:#c3d3d3; --fg-3:#9fb2b2; --fg-4:var(--n-400); --fg-inv:var(--n-980);
+  --line:rgba(255,255,255,.09); --line-soft:rgba(255,255,255,.05); --line-strong:rgba(255,255,255,.17);
+  --grad:linear-gradient(100deg,var(--t-300) 0%,var(--c-300) 100%);
+  --grad-bright:linear-gradient(100deg,var(--t-400) 0%,var(--c-400) 100%);
+  --accent:var(--t-300); --accent-fg:var(--t-300); --accent-on:var(--n-950);
+  --accent-soft:rgba(94,234,212,.11); --accent-line:rgba(94,234,212,.32);
+  --danger:var(--r-500); --danger-fg:var(--r-400);
+  --danger-soft:rgba(248,113,113,.11); --danger-line:rgba(248,113,113,.3);
+  --warn:var(--a-400); --warn-fg:var(--a-300);
+  --warn-soft:rgba(251,191,36,.1); --warn-line:rgba(251,191,36,.3);
+}
+
+/* ─── base ──────────────────────────────────────────────────────────────── */
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font-family:var(--font-sans); font-size:var(--t-base); line-height:1.65;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+.wrap{max-width:1180px; margin-inline:auto; padding-inline:var(--gutter)}
+.col{max-width:62ch}
+p{margin:0 0 var(--s-5)}
+p:last-child{margin-bottom:0}
+strong{font-weight:600; color:var(--fg)}
+em{font-style:italic}
+:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:var(--r-xs)}
+.gradtext{background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent}
+
+/* ─── masthead ──────────────────────────────────────────────────────────── */
+.mast{padding-block:clamp(4rem,10vw,8.5rem) clamp(3rem,6vw,5rem)}
+.kicker{
+  font-family:var(--font-mono); font-size:var(--t-xs); letter-spacing:.1em;
+  text-transform:uppercase; color:var(--fg-4); margin:0 0 var(--s-8);
+  display:flex; align-items:center; gap:var(--s-3);
+}
+.kicker::before{content:""; width:46px; height:3px; border-radius:2px; background:var(--grad)}
+h1{
+  font-size:var(--t-display); font-weight:600; letter-spacing:-.035em; line-height:1.02;
+  margin:0 0 var(--s-8); max-width:13ch; text-wrap:balance;
+}
+.lede{font-size:clamp(1.0625rem, .95rem + .4vw, 1.375rem); line-height:1.55; color:var(--fg-3); max-width:48ch; margin:0 0 var(--s-12); font-weight:400}
+.meta{display:flex; flex-wrap:wrap; gap:var(--s-3) var(--s-8); font-family:var(--font-mono); font-size:var(--t-xs); color:var(--fg-4)}
+.meta b{color:var(--fg-2); font-weight:500}
+
+/* ─── FULL-BLEED BANDS ──────────────────────────────────────────────────── */
+.bleed{width:100%}
+.bleed--alert{background:var(--danger-grad); color:#fff}
+.bleed--alert .wrap{
+  display:flex; align-items:center; gap:var(--s-5); padding-block:var(--s-5);
+}
+.bleed--rule{height:1px; background:var(--grad-bright); opacity:.55}
+.alert__dot{width:9px;height:9px;border-radius:var(--r-full);background:#fff;flex:none;animation:pulse 2.4s var(--ease) infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.72)}}
+@media (prefers-reduced-motion:reduce){.alert__dot{animation:none}}
+.alert__txt{flex:1; min-width:0}
+.alert__t{font-weight:600; font-size:var(--t-base); letter-spacing:-.01em}
+.alert__s{font-size:var(--t-sm); opacity:.86; margin-top:2px}
+.alert__clock{font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:var(--t-base); font-weight:500; background:rgba(255,255,255,.2); padding:4px 10px; border-radius:var(--r-xs); flex:none}
+.alert__btn{background:#fff; color:var(--r-700); border:0; font:inherit; font-weight:600; font-size:var(--t-sm); padding:8px 16px; border-radius:var(--r-xs); cursor:pointer; flex:none}
+.bleed__note{
+  background:var(--sunken); border-block:1px solid var(--line);
+}
+.bleed__note .wrap{padding-block:var(--s-4); font-size:var(--t-sm); color:var(--fg-3); max-width:1180px}
+.bleed__note a{color:var(--accent-fg); font-weight:500; text-decoration:none; white-space:nowrap}
+.bleed__note a:hover{text-decoration:underline}
+
+/* ─── sections ──────────────────────────────────────────────────────────── */
+section{padding-block:var(--rhythm)}
+section + section{padding-top:0}
+.eyebrow{
+  font-family:var(--font-mono); font-size:var(--t-xs); letter-spacing:.1em; text-transform:uppercase;
+  color:var(--accent-fg); margin:0 0 var(--s-5); display:flex; align-items:center; gap:var(--s-3);
+}
+.eyebrow::before{content:""; width:7px; height:7px; border-radius:var(--r-full); background:var(--grad); flex:none}
+h2{font-size:clamp(1.5rem, 1.2rem + 1.1vw, 2.125rem); font-weight:600; letter-spacing:-.026em; line-height:1.15; margin:0 0 var(--s-6); max-width:22ch; text-wrap:balance}
+h3{font-size:var(--t-md); font-weight:600; letter-spacing:-.012em; margin:var(--s-12) 0 var(--s-4)}
+
+/* ─── specimen ──────────────────────────────────────────────────────────── */
+.specimen{margin:var(--s-10) 0 var(--s-5); border:1px solid var(--line); border-radius:var(--r-md); background:var(--sunken); overflow:hidden}
+.specimen__bar{
+  display:flex; justify-content:space-between; gap:var(--s-4); padding:var(--s-3) var(--s-5);
+  border-bottom:1px solid var(--line); background:var(--surface);
+  font-family:var(--font-mono); font-size:var(--t-2xs); letter-spacing:.08em; text-transform:uppercase; color:var(--fg-4);
+}
+.specimen__body{padding:var(--s-6); overflow-x:auto}
+.caption{font-size:var(--t-sm); color:var(--fg-4); max-width:64ch; margin:0}
+.goal{
+  font-size:var(--t-sm); line-height:1.6; color:var(--fg-2); max-width:62ch;
+  margin:var(--s-5) 0 0; padding-left:var(--s-4); border-left:3px solid var(--accent);
+}
+.goal b{color:var(--fg); font-weight:600}
+
+/* the questions a screen answers, one per line. Run together in a sentence
+   they read as one long clause; stacked, they read as what they are: three
+   separate things the screen is accountable for, in a fixed order. */
+.qs{list-style:none; margin:0 0 var(--s-5); padding:0; max-width:62ch;
+  display:flex; flex-direction:column; gap:var(--s-3)}
+.qs li{position:relative; padding-left:var(--s-6); color:var(--fg-2); font-weight:500}
+.qs li::before{
+  content:""; position:absolute; left:0; top:.72em;
+  width:14px; height:4px; border-radius:2px; background:var(--grad);
+}
+
+/* ─── the app, rendered ─────────────────────────────────────────────────── */
+.app{min-width:860px; max-width:100%; background:var(--bg); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; font-size:var(--t-sm)}
+.chrome{display:flex; align-items:center; gap:var(--s-6); padding:var(--s-4) var(--s-5); border-bottom:1px solid var(--line); background:var(--surface)}
+.wordmark{font-weight:700; letter-spacing:-.03em; font-size:var(--t-base)}
+.chrome nav{display:flex; gap:var(--s-5); color:var(--fg-4); font-size:var(--t-xs)}
+.chrome nav b{color:var(--fg); font-weight:500}
+.grow{flex:1}
+.kbd{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); border:1px solid var(--line); border-radius:var(--r-xs); padding:2px 7px}
+
+/* tier 1 · in-app rail, same gradient as the page band */
+.rail{background:var(--danger-grad); color:#fff; display:flex; align-items:center; gap:var(--s-4); padding:var(--s-3) var(--s-5)}
+.rail__dot{width:7px;height:7px;border-radius:var(--r-full);background:#fff;flex:none;animation:pulse 2.4s var(--ease) infinite}
+@media (prefers-reduced-motion:reduce){.rail__dot{animation:none}}
+.rail__txt{flex:1;min-width:0}
+.rail__t{font-weight:600;font-size:var(--t-sm)}
+.rail__s{font-size:var(--t-xs);opacity:.87;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail__c{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:var(--t-sm);background:rgba(255,255,255,.2);padding:2px 8px;border-radius:var(--r-xs);flex:none}
+.rail__b{background:#fff;color:var(--r-700);border:0;font:inherit;font-weight:600;font-size:var(--t-2xs);padding:6px 12px;border-radius:var(--r-xs);cursor:pointer;flex:none}
+
+/* The rail and the chrome run edge to edge; everything else is inset. That
+   gap is the whole reason the band reads as outranking the page. */
+.page{padding:var(--s-6) var(--s-8) var(--s-8); display:flex; flex-direction:column; gap:var(--s-6)}
+.greet{padding-top:var(--s-2)}
+.greet b{display:block; color:var(--fg); font-size:var(--t-xl); font-weight:600; letter-spacing:-.028em; margin-bottom:var(--s-2)}
+.greet b i{font-style:normal; color:var(--fg-4); font-weight:400; letter-spacing:-.01em}
+.greet span{color:var(--fg-4); font-size:var(--t-xs)}
+
+/* Floaty stats: no card, no border, left-aligned to the same rail as
+   everything below. The escalation count is deliberately absent: the band above
+   already carries it, with a clock. Two places for one number is two places to
+   disagree. */
+.stats{display:flex; flex-wrap:wrap; justify-content:flex-end; gap:var(--s-10); text-align:right; margin-top:calc(var(--s-2) * -1)}
+.stat{display:flex; flex-direction:column; align-items:flex-end; gap:2px}
+.stat__n{font-size:2.125rem; font-weight:600; line-height:.95; letter-spacing:-.045em; font-variant-numeric:tabular-nums}
+.stat__l{font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.09em; color:var(--fg-4); white-space:nowrap}
+.stat--muted .stat__n{color:var(--fg-4)}
+.stat__n em{font-style:normal; font-size:var(--t-sm); font-weight:500; letter-spacing:0; color:var(--fg-4); margin-left:6px}
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
+.ver{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); border:1px solid var(--line); border-radius:var(--r-xs); padding:0 5px}
+
+/* pills */
+.pill{display:inline-flex; align-items:center; gap:6px; font-size:var(--t-2xs); font-weight:500; padding:4px 10px; border-radius:var(--r-full); border:1px solid var(--line); background:var(--surface); color:var(--fg-3); white-space:nowrap}
+.pill--accent{background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent-fg)}
+.pill--danger{background:var(--danger-soft); border-color:var(--danger-line); color:var(--danger-fg)}
+.pill--warn{background:var(--warn-soft); border-color:var(--warn-line); color:var(--warn-fg)}
+.pill--done{color:var(--fg-3); background:var(--sunken)}
+.pill--faint{color:var(--fg-4); background:var(--sunken)}
+.pill__d{width:5px;height:5px;border-radius:var(--r-full);background:currentColor}
+.pill__c{font-family:var(--font-mono); font-variant-numeric:tabular-nums}
+.chk{font-size:11px}
+
+.btn-grad{background:var(--grad); color:var(--accent-on); border:0; font:inherit; font-weight:600; font-size:var(--t-sm); padding:var(--s-3) var(--s-5); border-radius:var(--r-xs); cursor:pointer; white-space:nowrap}
+
+/* ── the review table ──
+   Five columns, not seven. Capture belongs with the interview it describes, and
+   the action belongs on the status cell. Two columns that were carrying one
+   fact each were the reason this looked crowded. */
+.toolbar{display:flex; align-items:center; gap:var(--s-3); padding:var(--s-5) var(--s-5) var(--s-4); flex-wrap:wrap}
+.toolbar__t{font-size:var(--t-md); font-weight:600; letter-spacing:-.018em}
+.toolbar__c{font-size:var(--t-2xs); color:var(--fg-4); font-family:var(--font-mono)}
+.ctl{border:1px solid var(--line); border-radius:var(--r-xs); background:var(--surface); padding:5px var(--s-3); color:var(--fg-4); font-size:var(--t-xs); display:inline-flex; align-items:center; gap:var(--s-2); white-space:nowrap}
+.ctl--search{flex:1; min-width:150px; max-width:230px; background:var(--inset)}
+.ctl b{color:var(--fg-2); font-weight:500}
+.dt{width:100%; border-collapse:collapse; font-size:var(--t-sm); margin:0; table-layout:fixed}
+.dt th{text-align:left; padding:var(--s-2) var(--s-4); border-block:1px solid var(--line); font-family:var(--font-mono); font-size:var(--t-2xs); font-weight:500; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-4); white-space:nowrap; background:var(--sunken)}
+.dt th.sorted{color:var(--accent-fg)}
+.dt th:first-child,.dt td:first-child{padding-left:var(--s-5)}
+.dt th:last-child,.dt td:last-child{padding-right:var(--s-5)}
+.dt td{padding:var(--s-4); border-bottom:1px solid var(--line-soft); vertical-align:top; color:var(--fg-3); line-height:1.45}
+.dt tr:last-child td{border-bottom:0}
+.dt .who{color:var(--fg); font-weight:500}
+.dt .sub{display:block; font-weight:400; color:var(--fg-4); font-size:var(--t-2xs); margin-top:3px}
+.dt .mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums}
+.dt .out b{display:block; color:var(--fg-2); font-weight:500; margin-bottom:3px}
+.dt .out span{font-size:var(--t-xs); color:var(--fg-4)}
+/* the urgent row borrows the escalation band's own treatment */
+.tr--urgent td{background:var(--danger-soft)}
+.tr--urgent td:first-child{position:relative}
+.tr--urgent td:first-child::before{content:""; position:absolute; inset:0 auto 0 0; width:3px; background:var(--danger-grad)}
+.tr--urgent .out b{color:var(--danger-fg)}
+.status{display:flex; align-items:center; justify-content:space-between; gap:var(--s-3)}
+.meter{display:flex; align-items:center; gap:var(--s-2); font-size:var(--t-2xs); color:var(--fg-4); font-variant-numeric:tabular-nums; margin-top:6px}
+.meter__t{width:46px; height:4px; border-radius:2px; background:var(--line-strong); overflow:hidden; flex:none}
+.meter__f{display:block; height:100%; background:var(--grad-bright); border-radius:2px}
+.meter__f--low{background:var(--danger)}
+.act-link{color:var(--accent-fg); font-size:var(--t-md); line-height:1; flex:none}
+.pager{display:flex; align-items:center; justify-content:space-between; gap:var(--s-4); padding:var(--s-4) var(--s-5); border-top:1px solid var(--line); font-size:var(--t-2xs); color:var(--fg-4); font-family:var(--font-mono)}
+.pages{display:flex; gap:4px; align-items:center}
+.pg{min-width:23px; height:23px; padding:0 6px; display:grid; place-items:center; border:1px solid var(--line); border-radius:var(--r-xs); font-size:var(--t-2xs)}
+.pg--on{background:var(--grad); color:var(--accent-on); border-color:transparent; font-weight:500}
+.pg--off{color:var(--line-strong); border-color:var(--line-soft)}
+
+/* ── two-up cards below the table: what is out, and what came back ──
+   Both are glances. Two lines per item, a fixed five rows, and a way out to
+   the full list, because a card that grows without bound stops being a glance. */
+.duo{display:grid; grid-template-columns:1fr 1fr; gap:var(--s-4); align-items:start}
+.card{border:1px solid var(--line); border-radius:var(--r-sm); background:var(--surface); overflow:hidden}
+.card__h{display:flex; justify-content:space-between; gap:var(--s-3); padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line-soft); font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.09em; color:var(--fg-4)}
+.card__f{padding:var(--s-3) var(--s-4); border-top:1px solid var(--line-soft); font-size:var(--t-2xs); color:var(--accent-fg); font-weight:500}
+.item{padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line-soft)}
+.item:last-of-type{border-bottom:0}
+.item__t{display:flex; justify-content:space-between; align-items:baseline; gap:var(--s-3)}
+.item__n{font-size:var(--t-sm); font-weight:500; color:var(--fg)}
+.item__m{font-size:var(--t-2xs); color:var(--fg-4); font-family:var(--font-mono); white-space:nowrap; flex:none}
+.item__s{display:block; font-size:var(--t-xs); color:var(--fg-4); margin-top:3px; line-height:1.4}
+
+/* ── interview detail: what the queue's arrow opens ── */
+.crumb{display:flex; align-items:center; gap:var(--s-2); padding:var(--s-4) var(--s-6); border-bottom:1px solid var(--line-soft); font-size:var(--t-xs); color:var(--fg-4)}
+.crumb b{color:var(--fg); font-weight:500}
+.crumb i{font-style:normal; color:var(--line-strong)}
+.dhead{display:flex; justify-content:space-between; align-items:flex-start; gap:var(--s-6); padding:var(--s-5) var(--s-6); flex-wrap:wrap}
+.dhead__n{display:block; font-size:var(--t-lg); font-weight:600; letter-spacing:-.025em}
+.dhead__s{display:block; font-size:var(--t-xs); color:var(--fg-4); font-family:var(--font-mono); margin-top:3px}
+.chips{display:flex; gap:var(--s-2); flex-wrap:wrap; align-items:center}
+/* the history strip is now a timeline · see the .tl block below */
+.panes{display:grid; grid-template-columns:1.35fr 1fr; gap:var(--s-5); padding:0 var(--s-6) var(--s-6); align-items:start}
+.pane{border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
+.tabs{display:flex; gap:var(--s-4); padding:0 var(--s-4); border-bottom:1px solid var(--line); background:var(--sunken)}
+.tab{padding:var(--s-3) 0; font-size:var(--t-xs); color:var(--fg-4); border-bottom:2px solid transparent; margin-bottom:-1px}
+.tab--on{color:var(--accent-fg); border-bottom-color:var(--accent); font-weight:500}
+.tline{display:grid; grid-template-columns:52px 1fr; gap:var(--s-3); padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line-soft); font-size:var(--t-xs)}
+.tline:last-child{border-bottom:0}
+.tline__t{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4)}
+.tline__w{color:var(--fg-4); text-transform:uppercase; letter-spacing:.06em; font-size:var(--t-2xs); display:block; margin-bottom:2px}
+.tline__x{color:var(--fg-2)}
+.scan{display:block; margin-top:4px; font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4)}
+.scan--hit{color:var(--danger-fg)}
+.cmp{border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
+.cmp__h{padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line); background:var(--sunken); font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.09em; color:var(--fg-4)}
+.cmp__b{padding:var(--s-4); display:flex; flex-direction:column; gap:var(--s-4)}
+.fld__l{display:block; font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.08em; color:var(--fg-4); margin-bottom:5px}
+.fld__v{display:block; border:1px solid var(--line); border-radius:var(--r-xs); background:var(--inset); padding:var(--s-3); font-size:var(--t-xs); color:var(--fg-3); line-height:1.5}
+.fld__v--ro{background:var(--sunken); color:var(--fg-4)}
+.sig{border-top:1px solid var(--line); padding:var(--s-4); background:var(--sunken); display:flex; flex-direction:column; gap:var(--s-3)}
+.sig__h{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); line-height:1.6; word-break:break-all}
+.sig__r{display:flex; align-items:center; justify-content:space-between; gap:var(--s-3)}
+
+/* ── patients ── */
+.rel{font-size:var(--t-2xs); color:var(--fg-4); display:block; margin-top:3px}
+
+@media (max-width:860px){
+  .arc{grid-template-columns:1fr 1fr}
+  .bleed--alert .wrap{flex-wrap:wrap}
+  h1{max-width:none}
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PUNCH PASS · more air, bigger type, and the accent spent as graphic
+   The token set is untouched. What changes is *spend*: the document chrome
+   now commits to the accent at full strength, while the app specimens keep
+   the four-places discipline the text argues for. Document ≠ product.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --gutter:clamp(1.5rem,5vw,5.5rem);
+  --rhythm:clamp(6rem,11vw,10.5rem);
+  --t-display:clamp(3rem, 2.1rem + 4.6vw, 5.75rem);
+}
+
+/* One left rail, all the way down. `.wrap.col` collapsed the container to a
+   62ch measure and then centred it, so half the sections started at the page
+   edge and half started a third of the way in. The measure belongs to the
+   prose, not to the container: the rail is the thing that must not move. */
+.wrap.col{max-width:1180px}
+.wrap.col > p:not([class]){max-width:62ch}
+
+/* ─── type, louder ──────────────────────────────────────────────────────── */
+h1{font-weight:700; letter-spacing:-.045em; line-height:.98; max-width:12ch; margin-bottom:var(--s-10)}
+h2{font-size:clamp(1.75rem, 1.25rem + 1.9vw, 2.75rem); font-weight:700; letter-spacing:-.032em; line-height:1.08}
+h3{font-size:var(--t-lg); font-weight:700; letter-spacing:-.02em; margin-top:var(--s-16)}
+.mast{padding-block:clamp(5rem,12vw,10rem) clamp(3.5rem,7vw,6rem)}
+.lede{font-size:clamp(1.125rem,1rem + .55vw,1.5rem); color:var(--fg-2)}
+.lede-2{font-size:var(--t-base); line-height:1.65; color:var(--fg-3); max-width:58ch; margin:0 0 var(--s-12)}
+.mast .lede{margin-bottom:var(--s-6); font-weight:500; color:var(--fg); max-width:30ch; letter-spacing:-.015em}
+
+.eyebrow{
+  font-size:var(--t-2xs); letter-spacing:.16em; font-weight:500;
+  color:var(--fg-2); margin-bottom:var(--s-6);
+}
+.eyebrow::before{width:26px; height:6px; border-radius:3px; background:var(--grad)}
+.kicker::before{width:64px; height:5px}
+
+/* ─── ① the five acts ───────────────────────────────────────────────────── */
+.arc{
+  display:grid; grid-template-columns:repeat(5,1fr); gap:var(--s-3);
+  margin:var(--s-12) 0 var(--s-6);
+}
+.act{
+  display:flex; flex-direction:column; gap:var(--s-2);
+  padding:var(--s-5) var(--s-4) var(--s-5); border-radius:var(--r-sm);
+  background:var(--sunken); border:1px solid var(--line);
+  position:relative; overflow:hidden;
+}
+.act::before{content:""; position:absolute; inset:0 0 auto 0; height:4px; background:var(--line-strong)}
+.act:nth-child(1)::before{background:var(--grad); opacity:.3}
+.act:nth-child(2)::before{background:var(--grad); opacity:.45}
+.act:nth-child(3)::before{background:var(--grad); opacity:.6}
+.act:nth-child(4)::before{background:var(--grad); opacity:.8}
+.act__n{font-family:var(--font-mono); font-size:var(--t-2xs); letter-spacing:.14em; color:var(--fg-4)}
+.act__t{font-size:var(--t-md); font-weight:700; letter-spacing:-.022em; color:var(--fg)}
+.act__d{font-size:var(--t-xs); line-height:1.5; color:var(--fg-3); flex:1}
+.act__w{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); letter-spacing:.04em}
+/* Act V is the product, so Act V is the only filled card. */
+.act--out{background:var(--grad-card); border-color:transparent; color:#fff}
+.act--out::before{background:#fff}
+.act--out .act__n{color:rgba(255,255,255,.7)}
+.act--out .act__t{color:#fff}
+.act--out .act__d{color:rgba(255,255,255,.88)}
+.act--out .act__w{color:rgba(255,255,255,.72)}
+
+/* ─── the three states an interview comes back in ─────────────────────────
+   They are not three intensities of one thing. One stops the conversation and
+   starts a clock; one joins the queue at the top and does not; one is simply
+   the work. Giving the second or third red as well would spend the loudest
+   colour in the product on the commonest event, which is how a clinician
+   learns to ignore it. */
+.esc{display:grid; grid-template-columns:1fr 1fr; gap:var(--s-4); margin-top:var(--s-4)}
+.esc__c{
+  display:flex; flex-direction:column; gap:var(--s-3);
+  padding:var(--s-5) var(--s-6); border-radius:var(--r-sm);
+  position:relative; overflow:hidden;
+}
+.esc__k{font-family:var(--font-mono); font-size:var(--t-2xs); letter-spacing:.14em; text-transform:uppercase}
+.esc__t{font-size:var(--t-md); font-weight:700; letter-spacing:-.022em; margin-top:-6px}
+.esc__d{font-size:var(--t-sm); line-height:1.6; flex:1}
+.esc__demo{display:flex; gap:var(--s-2); flex-wrap:wrap; align-items:center; margin-top:var(--s-1)}
+/* immediate · the alert band's own paint, because it is the same obligation */
+.esc__c--now{background:var(--danger-grad); color:#fff}
+.esc__c--now .esc__k{color:rgba(255,255,255,.74)}
+.esc__c--now .esc__t{color:#fff}
+.esc__c--now .esc__d{color:rgba(255,255,255,.88)}
+/* a red chip on a red card is invisible, so it goes translucent-white */
+.esc__c--now .chipdemo{background:rgba(255,255,255,.2)}
+.esc__c--now .chipdemo span{background:rgba(0,0,0,.18)}
+/* attention · amber, and deliberately not red: it is owed, but it is not timed */
+.esc__c--attn{background:var(--warn-soft); border:1px solid var(--warn-line)}
+.esc__c--attn::before{content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--warn)}
+.esc__c--attn .esc__k{color:var(--warn-fg)}
+.esc__c--attn .esc__t{color:var(--fg)}
+.esc__c--attn .esc__d{color:var(--fg-2)}
+/* an amber pill on an amber card needs a ground of its own to read as a badge */
+.esc__c--attn .pill--warn{background:var(--surface)}
+
+.chipdemo{
+  display:inline-flex; align-items:center; gap:var(--s-2); background:var(--danger-grad); color:#fff;
+  font-size:var(--t-2xs); font-weight:600; padding:5px 10px; border-radius:var(--r-full); white-space:nowrap;
+}
+.chipdemo span{font-family:var(--font-mono); background:rgba(255,255,255,.22); padding:1px 6px; border-radius:var(--r-xs)}
+
+/* ─── prose tables ──────────────────────────────────────────────────────── */
+.scroller{overflow-x:auto; margin:var(--s-8) 0 var(--s-5); border:1px solid var(--line); border-radius:var(--r-sm)}
+.scroller table{width:100%; min-width:640px; border-collapse:collapse; font-size:var(--t-sm)}
+.scroller th{
+  text-align:left; padding:var(--s-3) var(--s-4); background:var(--sunken); border-bottom:1px solid var(--line);
+  font-family:var(--font-mono); font-size:var(--t-2xs); font-weight:500; text-transform:uppercase;
+  letter-spacing:.1em; color:var(--fg-4); white-space:nowrap;
+}
+.scroller td{padding:var(--s-4); border-bottom:1px solid var(--line-soft); color:var(--fg-3); line-height:1.55; vertical-align:top}
+.scroller tr:last-child td{border-bottom:0}
+.scroller td:first-child{color:var(--fg-2); font-weight:500}
+.scroller td s{color:var(--fg-4)}
+
+/* ─── deployment compose · four choices, one patient ─────────────────────
+   Who, what, when, how: one field each, side by side, because they are
+   four answers to one question and not a sequence of screens. Nothing else
+   is asked, because nothing else is a clinician's decision here. */
+.dep{display:grid; grid-template-columns:repeat(4,1fr)}
+.dep .fld{padding:var(--s-4) var(--s-5) var(--s-5); border-right:1px solid var(--line-soft)}
+.dep .fld:last-child{border-right:0}
+/* the four values stack value-then-meta, so all four fields share one rhythm
+   however long the patient name or the slot happens to be */
+.dep .fld__v--sel{flex-direction:column; align-items:flex-start; gap:4px}
+.fld__v--sel{display:flex; justify-content:space-between; align-items:baseline; gap:var(--s-3)}
+.fld__v--sel u{text-decoration:none; font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4)}
+
+/* the send row is deliberately quiet, because sending is the expected outcome, so
+   it gets no colour of its own beyond the one button */
+.send{padding:var(--s-4) var(--s-5); background:var(--sunken); border-top:1px solid var(--line-soft);
+  display:flex; align-items:center; justify-content:space-between; gap:var(--s-5); flex-wrap:wrap}
+.send__t{font-size:var(--t-xs); color:var(--fg-3); line-height:1.55; max-width:58ch}
+.send__t b{color:var(--fg-2); font-weight:600}
+@media (max-width:860px){
+  .dep{grid-template-columns:1fr 1fr}
+  .dep .fld:nth-child(2n){border-right:0}
+  .dep .fld:nth-child(-n+2){border-bottom:1px solid var(--line-soft)}
+}
+
+/* ─── footer ────────────────────────────────────────────────────────────── */
+footer{padding-block:var(--s-10) var(--s-16)}
+footer .wrap{display:flex; flex-wrap:wrap; gap:var(--s-3) var(--s-8); font-family:var(--font-mono); font-size:var(--t-2xs); letter-spacing:.06em; color:var(--fg-4)}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PATIENT EXPERIENCE · out of the card, onto the page
+   The verbatim quotes were never a glance: five people's sentences in a box
+   is a reading task sitting where a scan should be. What a clinician needs
+   from feedback at 07:40 is shape and volume: is it holding, and how many
+   said so. The words move to their own view; this keeps the pulse.
+   ══════════════════════════════════════════════════════════════════════════ */
+.px{display:flex; flex-direction:column; gap:var(--s-6); padding:var(--s-2) 0 0}
+.px__top{display:flex; align-items:flex-start; justify-content:space-between; gap:var(--s-6); flex-wrap:wrap}
+.px__t{font-size:var(--t-md); font-weight:700; letter-spacing:-.022em; margin:0}
+.px__s{font-size:var(--t-xs); color:var(--fg-4); margin:3px 0 0; max-width:52ch; line-height:1.5}
+
+/* the range control · one row, above the chart, never beside it */
+.seg{display:inline-flex; padding:3px; gap:2px; border:1px solid var(--line); border-radius:var(--r-full); background:var(--inset); flex:none}
+.seg__b{
+  font:inherit; font-size:var(--t-2xs); font-weight:500; letter-spacing:.02em;
+  border:0; background:none; color:var(--fg-4); padding:6px 14px; border-radius:var(--r-full);
+  cursor:pointer; white-space:nowrap; transition:color .18s var(--ease), background .18s var(--ease);
+}
+.seg__b:hover{color:var(--fg-2)}
+/* the control wears the sweep the columns wear: same gradient, same
+   direction, so the filter and the thing it filters read as one object.
+   It stays on --accent-on rather than a hard white: the sweep is bright in
+   dark mode, where white label on bright cyan would fail. */
+.seg__b--on{background:var(--sweep); color:var(--accent-on)}
+.seg__b--on:hover{color:var(--accent-on)}
+
+/* three spans, floaty, no boxes, same reasoning as the counts above */
+.px__stats{display:flex; flex-wrap:wrap; gap:var(--s-8) var(--s-16)}
+.pxs{display:flex; flex-direction:column; gap:2px; min-width:132px}
+.pxs__l{font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.1em; color:var(--fg-4); white-space:nowrap}
+.pxs__n{
+  font-size:2.75rem; font-weight:700; line-height:.92; letter-spacing:-.048em;
+  background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.pxs__n u{text-decoration:none; font-size:var(--t-md); font-weight:500; letter-spacing:-.01em; -webkit-text-fill-color:var(--fg-4); margin-left:4px}
+.pxs__d{font-size:var(--t-2xs); color:var(--fg-4); font-variant-numeric:tabular-nums}
+.pxs__d b{color:var(--accent-fg); font-weight:600}
+
+.px__legend{display:flex; flex-wrap:wrap; gap:var(--s-2) var(--s-5); font-size:var(--t-2xs); color:var(--fg-4)}
+.lg{display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+.lg i{width:10px; height:10px; border-radius:3px; flex:none}
+.lg--pos i{background:var(--t-700)}
+.lg--neu i{background:var(--n-400)}
+.lg--neg i{background:var(--a-600)}
+.px__plot{position:relative; margin-top:var(--s-4)}
+.px__plot svg{display:block; width:100%; height:auto; overflow:visible}
+.px__plot .gx{fill:var(--fg-4); font-family:var(--font-mono); font-size:11px; letter-spacing:.04em}
+.px__plot .cap{fill:var(--fg-2); font-family:var(--font-mono); font-size:11.5px; font-weight:500}
+.px__plot .cap--zero{fill:var(--fg-4)}
+.px__plot .base{stroke:var(--line-strong); stroke-width:1}
+.px__plot .hit{fill:transparent; cursor:default}
+.tip{
+  position:absolute; top:0; left:0; pointer-events:none; opacity:0; transform:translate(-50%,0);
+  background:var(--n-900); color:var(--n-25); border-radius:var(--r-xs); padding:8px 10px;
+  font-size:var(--t-2xs); line-height:1.5; white-space:nowrap; z-index:5;
+  transition:opacity .12s var(--ease); box-shadow:0 6px 22px rgba(0,0,0,.22);
+}
+.tip--on{opacity:1}
+.tip b{display:block; font-family:var(--font-mono); letter-spacing:.05em; color:#fff; margin-bottom:3px}
+.tip span{display:flex; align-items:center; gap:6px; font-variant-numeric:tabular-nums}
+.tip i{width:8px; height:8px; border-radius:2px; flex:none}
+.px__vals{font-size:var(--t-2xs); color:var(--fg-4)}
+.px__vals summary{cursor:pointer; color:var(--accent-fg); font-weight:500; list-style:none}
+.px__vals summary::-webkit-details-marker{display:none}
+.px__vals summary{display:inline-flex; align-items:center; gap:6px}
+.px__vals summary::before{content:"▸"; font-size:11px; line-height:1}
+.px__vals[open] summary::before{content:"▾"}
+.px__vals table{width:100%; border-collapse:collapse; margin-top:var(--s-3); font-variant-numeric:tabular-nums}
+.px__vals th,.px__vals td{text-align:right; padding:5px var(--s-3); border-bottom:1px solid var(--line-soft); font-weight:400}
+.px__vals th:first-child,.px__vals td:first-child{text-align:left; font-family:var(--font-mono)}
+.px__vals th{color:var(--fg-3); font-weight:500}
+.px__foot{font-size:var(--t-2xs); color:var(--accent-fg); font-weight:500}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE HISTORY TIMELINE
+   It was five equal cards in a row, newest first. Two things were wrong with
+   that. A row of cards with no spine encodes no time: the gaps between a
+   patient's contacts are clinical signal, and equal cards threw that away. And
+   it ran backwards: right-to-left is not how anyone reads a chronology, so the
+   item you end on was the oldest, when the item you must end on is the one
+   waiting for your name.
+   So it runs oldest → newest, the intervals are labelled on the spine, and the
+   terminus is the interview that needs signing. A timeline that ends anywhere
+   else is just a list with a line drawn through it.
+   ══════════════════════════════════════════════════════════════════════════ */
+.tl{display:flex; overflow-x:auto; padding:var(--s-6) var(--s-6) var(--s-8)}
+.tl__i{
+  position:relative; flex:1 0 172px; min-width:172px; padding:var(--s-6) var(--s-5) 0 0;
+  display:flex; flex-direction:column; align-items:flex-start; gap:6px;
+}
+/* one spine segment per item, so it survives horizontal scrolling */
+.tl__i::before{content:""; position:absolute; top:6px; left:0; right:0; height:1px; background:var(--line-strong)}
+.tl__i:first-child::before{left:6px}
+.tl__i:last-child::before{right:auto; width:6px}
+.tl__node{
+  position:absolute; top:0; left:0; width:13px; height:13px; border-radius:var(--r-full);
+  background:var(--bg); border:2px solid var(--line-strong); box-sizing:border-box;
+}
+/* the interval rides the spine and breaks it, which is what makes the gap read
+   as a duration rather than as layout */
+.tl__gap{
+  position:absolute; top:-2px; left:50%; transform:translateX(-50%);
+  /* --bg, not --surface: the timeline sits on the app ground, and those two
+     are the same colour in light but not in dark, and --surface painted a visible
+     box behind every interval there. */
+  background:var(--bg); padding:0 6px;
+  font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); letter-spacing:.04em;
+}
+.tl__d{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); letter-spacing:.04em}
+.tl__p{font-size:var(--t-xs); color:var(--fg-2); font-weight:500; line-height:1.35}
+
+/* the terminus · the one that owes a signature.
+   It is deliberately NOT the escalation treatment: no clock, no pulse, no
+   danger gradient. Tier 1 stays exclusive to the band and the urgent pill this
+   item already carries. This is emphasis, which is a different job. */
+.tl__i--now{padding-right:0}
+.tl__i--now .tl__node{
+  width:17px; height:17px; top:-2px; border:0; background:var(--sweep);
+  box-shadow:0 0 0 4px var(--accent-soft);
+}
+.tl__i--now .tl__d{color:var(--accent-fg); font-weight:500}
+.tl__i--now .tl__p{color:var(--fg); font-weight:600}
+.tl__owed{
+  display:inline-flex; align-items:center; gap:6px; margin-top:2px;
+  font-size:var(--t-2xs); font-weight:600; letter-spacing:.02em; color:var(--accent-fg);
+}
+.tl__owed::before{content:""; width:14px; height:2px; border-radius:1px; background:var(--sweep)}
+
+@media (max-width:860px){
+  .tl__i,.tl__i--now{flex:0 0 150px}
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE REVIEW COMPOSER, PROMOTED
+   Act V is the product and this is the only surface where it happens, yet it
+   was a neutral card sitting beside the transcript, weighted exactly like it.
+   Two panes of equal weight read as "skim both"; the correct reading is "read
+   that, then commit to this." So the composer takes the accent surface.
+   It wears --grad-card specifically: the one ramp measured to carry white text
+   at every stop (4.58 / 4.73 / 4.55 : 1) and deliberately NOT re-pointed in
+   dark, so the surface a signature lands on is identical in both themes.
+   White is doing one job here and it is not decoration: a solid white box is
+   a field you can type in. The issued summary is read-only and stays
+   translucent, so "white = editable" is an affordance, not a paint choice.
+   ══════════════════════════════════════════════════════════════════════════ */
+.cmp{background:var(--grad-card); border-color:transparent; color:#fff}
+.cmp__h{background:transparent; border-bottom-color:rgba(255,255,255,.24); color:rgba(255,255,255,.85); font-weight:500}
+.cmp .fld__l{color:rgba(255,255,255,.82)}
+.cmp .fld__v{background:#fff; border-color:transparent; color:var(--n-800); box-shadow:0 1px 3px rgba(0,0,0,.16)}
+.cmp .fld__v--type{color:var(--n-400)}
+/* read-only is not a field, so it is not white */
+.cmp .fld__v--ro{background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); color:rgba(255,255,255,.9); box-shadow:none}
+.cmp .sig{background:rgba(0,0,0,.18); border-top-color:rgba(255,255,255,.22)}
+.cmp .sig__h{color:rgba(255,255,255,.62)}
+.cmp .sig__note{font-size:var(--t-2xs); color:rgba(255,255,255,.75)}
+/* a gradient button on a gradient card is invisible. The commit goes white,
+   the same move the escalation band makes with Schedule consultation. */
+.cmp .btn-grad{background:#fff; color:var(--t-800)}
+
+/* the calls card goes full width and its items go two-up */
+.duo{grid-template-columns:1fr; gap:var(--s-8)}
+.card__grid{display:grid; grid-template-columns:1fr 1fr}
+.card__grid .item:nth-child(odd){border-right:1px solid var(--line-soft)}
+.card__grid .item:nth-last-child(-n+2){border-bottom:0}
+
+@media (max-width:1000px){
+  .arc{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:860px){
+  .arc{grid-template-columns:1fr}
+  .esc{grid-template-columns:1fr}
+  .px__stats{gap:var(--s-6) var(--s-8)}
+  .card__grid{grid-template-columns:1fr}
+  .card__grid .item:nth-child(odd){border-right:0}
+}
+@media (prefers-reduced-motion:reduce){
+  .seg__b,.tip{transition:none}
+}
+
+/* dark: the chart's three marks re-point; the midpoint gray does not, because
+   it is the same gray in both themes by design: it is the absence of a side. */
+/* THE SWEEP · the brand's teal→cyan travel, and the only gradient a data mark
+   or a control is allowed to wear.
+   It moves in HUE at near-constant lightness, which is not a style choice: a
+   teal that ramps light→dark walks straight through the neutral midpoint, and
+   under deuteranopia the two become the same colour. Measured, the light ramp
+   collapses to ΔE 13.0 against the gray at cyan-600 and ΔE 10.0 at teal-500,
+   both below the 15 floor. Held at constant lightness every stop clears it
+   (16.6–17.0 normal, 12.7–13.5 deutan/protan). So the sweep is wide in hue and
+   narrow in value, and that is the whole reason it is legible.
+   The neutral midpoint does NOT sweep, in either theme. It is the absence of a
+   side, and a gradient would give it one. */
+:root{
+  --sw-1:#0b8478; --sw-2:#0a7f8e; --sw-3:#0a80a1;
+  --sw-w1:#d97706; --sw-w2:#c2410c;
+  --px-neu:var(--n-400);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --sw-1:#5eead4; --sw-2:#62e9e6; --sw-3:#67e8f9;
+    --sw-w1:#fbbf24; --sw-w2:#f59e0b;
+  }
+}
+:root[data-theme="dark"]{
+  --sw-1:#5eead4; --sw-2:#62e9e6; --sw-3:#67e8f9;
+  --sw-w1:#fbbf24; --sw-w2:#f59e0b;
+}
+:root{
+  --sweep:linear-gradient(100deg,var(--sw-1) 0%,var(--sw-2) 45%,var(--sw-3) 100%);
+  --sweep-warn:linear-gradient(100deg,var(--sw-w1) 0%,var(--sw-w2) 100%);
+}
+.lg--pos i{background:var(--sweep)}
+.lg--neg i{background:var(--sweep-warn)}
+.lg--neu i{background:var(--px-neu)}
+
+/* the third state card · turquoise, because "review ready" is the interface
+   asking for a decision, not the patient reporting something. */
+.esc--3{grid-template-columns:repeat(3,1fr)}
+.esc__c--rev{background:var(--accent-soft); border:1px solid var(--accent-line)}
+.esc__c--rev::before{content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--grad)}
+.esc__c--rev .esc__k{color:var(--accent-fg)}
+.esc__c--rev .esc__t{color:var(--fg)}
+.esc__c--rev .esc__d{color:var(--fg-2)}
+.esc__c--rev .pill--accent{background:var(--surface)}
+
+@media (max-width:1000px){
+  .esc--3{grid-template-columns:1fr}
+}
+</style>
+
+<header class="mast">
+  <div class="wrap">
+    <p class="kicker">threep.io · written for clinicians</p>
+    <h1>The clinician <span class="gradtext">portal</span></h1>
+    <p class="lede">
+      Send a structured interview to a patient, read what comes back, and sign it.
+    </p>
+    <p class="lede-2">
+      A patient answers by voice or by text, in their own time. A clinician opens one screen, sees what is
+      owed, reads the evidence, and commits to an impression. This page walks through the three screens
+      where that happens, with real content in them.
+    </p>
+    <div class="meta">
+      <span>Three screens <b>onto one patient record</b></span>
+      <span>Every escalation <b>owned by a human</b></span>
+      <span>Every review <b>signed by a named clinician</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="bleed bleed--alert">
+  <div class="wrap">
+    <span class="alert__dot"></span>
+    <span class="alert__txt">
+      <span class="alert__t">2 escalations need a consultation scheduled</span>
+      <span class="alert__s">A. M. · “breathless walking upstairs, that’s new this month” · raised 04:12</span>
+    </span>
+    <span class="alert__clock">06:41</span>
+    <button class="alert__btn" type="button">Schedule consultation</button>
+  </div>
+</div>
+<div class="bleed bleed__note">
+  <div class="wrap">
+    <strong>That band is somebody whose health is deteriorating and who needs a consultation booked
+    soon, not an ambulance.</strong> The conversation was stopped mid-interview and a named clinician
+    owes that appointment; the clock counts how long it has been owed. It follows you onto every screen,
+    and only a human clears it.
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">How it works</p>
+      <h2>The five steps, and the three ways it ends</h2>
+      <p>
+        The questions are fixed and approved long before any of this: nobody writes an interview per
+        patient. What varies is how far it gets, and every interview ends in one of the three ways below.
+      </p>
+    </div>
+
+    <div class="arc">
+      <div class="act">
+        <span class="act__n">STEP 1</span><span class="act__t">Deploy</span>
+        <span class="act__d">A clinician sends a structured interview to a patient on their panel.</span>
+        <span class="act__w">seconds · deployment dashboard</span>
+      </div>
+      <div class="act">
+        <span class="act__n">STEP 2</span><span class="act__t">Intake</span>
+        <span class="act__d">The patient answers by voice or text, in their own time, in their own words.</span>
+        <span class="act__w">minutes · patient phone or web</span>
+      </div>
+      <div class="act">
+        <span class="act__n">STEP 3</span><span class="act__t">Return</span>
+        <span class="act__d">The transcript and recording are saved to the patient’s record: ready to review, or needing you sooner.</span>
+        <span class="act__w">instant · automatic</span>
+      </div>
+      <div class="act">
+        <span class="act__n">STEP 4</span><span class="act__t">Review</span>
+        <span class="act__d">The clinician reads the evidence and the machine-drafted summary.</span>
+        <span class="act__w">minutes · patient profile</span>
+      </div>
+      <div class="act act--out">
+        <span class="act__n">STEP 5</span><span class="act__t">Sign</span>
+        <span class="act__d">A named registrant commits to a clinical impression, pinned to the record's hash.</span>
+        <span class="act__w">irreversible · patient profile</span>
+      </div>
+    </div>
+
+    <div class="esc esc--3">
+      <div class="esc__c esc__c--now">
+        <span class="esc__k">Rare · interrupts</span>
+        <span class="esc__t">Urgent escalation</span>
+        <span class="esc__d"><b>Needs a reviewer’s immediate attention.</b> The agent escalates, the interview stops, the patient is told a clinician will contact them, and a named clinician is alerted.</span>
+        <span class="esc__demo"><span class="chipdemo">Urgent review <span>06:41</span></span></span>
+      </div>
+      <div class="esc__c esc__c--attn">
+        <span class="esc__k">Routine · interrupts</span>
+        <span class="esc__t">Issue raised</span>
+        <span class="esc__d">The interview did not complete, or the agent raised a soft escalation concern.</span>
+        <span class="esc__demo"><span class="pill pill--warn">issue raised</span><span class="pill pill--warn">abandoned</span></span>
+      </div>
+      <div class="esc__c esc__c--rev">
+        <span class="esc__k">The common case</span>
+        <span class="esc__t">Review ready</span>
+        <span class="esc__d">It ran to the end and the output is complete. <b>Most interviews end here.</b></span>
+        <span class="esc__demo"><span class="pill pill--accent">review ready</span></span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">The dashboard</p>
+      <h2>What needs you, in the order it needs you</h2>
+      <p>It answers three questions, and it asks them in this order:</p>
+      <ul class="qs">
+        <li>Is anything on fire?</li>
+        <li>What do I owe a decision on?</li>
+        <li>Who is on my list?</li>
+      </ul>
+      <p>The order they are asked in is the layout.</p>
+       <p class="goal">
+        <b>Goal:</b> you open this screen once, and you know what to do next before you have clicked
+        anything.
+      </p>
+    </div>
+
+    <div class="specimen">
+      <div class="specimen__bar"><span>Clinician dashboard</span><span>View one</span></div>
+      <div class="specimen__body">
+        <div class="app">
+          <div class="chrome">
+            <span class="wordmark">threep.io</span>
+            <nav><b>Dashboard</b><span>Patients</span><span>Deployments</span></nav>
+            <span class="grow"></span><span class="kbd">⌘K</span>
+          </div>
+
+          <div class="rail">
+            <span class="rail__dot"></span>
+            <span class="rail__txt">
+              <span class="rail__t">2 escalations need a consultation scheduled</span>
+              <span class="rail__s">A. M. · “breathless walking upstairs, that’s new this month” · raised 04:12</span>
+            </span>
+            <span class="rail__c">06:41</span>
+            <button class="rail__b" type="button">Schedule</button>
+          </div>
+
+          <div class="page">
+            <div class="greet">
+              <b>Good morning, Dr Hollis <i>· 09:14</i></b>
+              <span>Thursday 18 August · counts updated 14 s ago</span>
+            </div>
+
+            <div class="stats">
+              <span class="stat"><span class="stat__n">11</span><span class="stat__l">Review ready</span></span>
+              <span class="stat"><span class="stat__n">3<em>1 live</em></span><span class="stat__l">In progress</span></span>
+              <span class="stat stat--muted"><span class="stat__n">4</span><span class="stat__l">Expiring · 48h</span></span>
+            </div>
+
+            <div class="panel">
+              <div class="toolbar">
+                <span class="toolbar__t">Review ready</span>
+                <span class="toolbar__c">11 open · 2 urgent</span>
+                <span class="grow"></span>
+                <span class="ctl ctl--search">Search patient or trigger</span>
+                <span class="ctl">Sort <b>urgency</b> ↓</span>
+                <span class="ctl">Protocol <b>all</b></span>
+              </div>
+
+              <table class="dt">
+                <colgroup>
+                  <col style="width:15%"><col style="width:19%"><col style="width:17%">
+                  <col style="width:27%"><col style="width:22%">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Patient</th><th>Interview</th><th class="sorted">Ended ↓</th>
+                    <th>Outcome</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="tr--urgent">
+                    <td><span class="who">A. Mitchell</span><span class="sub mono">NHS ···· 447</span></td>
+                    <td>Pre-op assessment <span class="ver">v3</span>
+                      <span class="meter"><span class="meter__t"><span class="meter__f meter__f--low" style="width:56%"></span></span>9/16 captured</span></td>
+                    <td class="mono">18 Aug 04:12<span class="sub">6 min ago</span></td>
+                    <td class="out"><b>Urgent escalation · deterioration flag</b><span>“breathless walking upstairs, that’s new this month”</span></td>
+                    <td><span class="status"><span class="pill pill--danger"><span class="pill__d"></span>urgent review<span class="pill__c">06:41</span></span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">D. Kaur</span><span class="sub mono">NHS ···· 902</span></td>
+                    <td>Pre-op assessment <span class="ver">v3</span>
+                      <span class="meter"><span class="meter__t"><span class="meter__f meter__f--low" style="width:44%"></span></span>7/16 captured</span></td>
+                    <td class="mono">18 Aug 02:48<span class="sub">8 hours ago</span></td>
+                    <td class="out"><b>Urgent escalation · neurological</b><span>“the left side of my face went numb”</span></td>
+                    <td><span class="status"><span class="pill pill--danger"><span class="pill__d"></span>urgent review<span class="pill__c">21:04</span></span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">J. Okafor</span><span class="sub mono">NHS ···· 118</span></td>
+                    <td>Pre-op assessment <span class="ver">v3</span>
+                      <span class="meter"><span class="meter__t"><span class="meter__f" style="width:100%"></span></span>16/16 captured</span></td>
+                    <td class="mono">17 Aug 19:04<span class="sub">yesterday</span></td>
+                    <td class="out"><b>Completed</b><span>Scanner ran on 34 turns and matched nothing</span></td>
+                    <td><span class="status"><span class="pill pill--accent">review ready</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">R. Byrne</span><span class="sub mono">NHS ···· 550</span></td>
+                    <td>Post-op check <span class="ver">v1</span>
+                      <span class="meter"><span class="meter__t"><span class="meter__f" style="width:50%"></span></span>6/12 captured</span></td>
+                    <td class="mono">17 Aug 11:30<span class="sub">yesterday</span></td>
+                    <td class="out"><b>Abandoned after 4 minutes</b><span>Stopped mid-answer on pain severity · window open to 20 Aug</span></td>
+                    <td><span class="status"><span class="pill pill--warn">abandoned</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">S. Adeyemi</span><span class="sub mono">NHS ···· 073</span></td>
+                    <td>Appointment confirmation <span class="ver">v2</span>
+                      <span class="meter"><span class="meter__t"><span class="meter__f" style="width:0%"></span></span>0/4 captured</span></td>
+                    <td class="mono">17 Aug 09:15<span class="sub">yesterday</span></td>
+                    <td class="out"><b>Verification locked</b><span>Three failed attempts on date of birth, not a clinical outcome</span></td>
+                    <td><span class="status"><span class="pill pill--warn">issue raised</span><span class="act-link">→</span></span></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="pager">
+                <span>showing 1–5 of 11</span>
+                <span class="pages">
+                  <span class="pg pg--off">‹</span>
+                  <span class="pg pg--on">1</span><span class="pg">2</span><span class="pg">3</span>
+                  <span class="pg">›</span>
+                </span>
+              </div>
+            </div>
+
+            <div class="duo">
+              <div class="card">
+                <div class="card__h"><span>Scheduled care calls</span><span>next 7 days · 4</span></div>
+                <div class="card__grid">
+                  <div class="item">
+                    <span class="item__t"><span class="item__n">P. Nowak</span><span class="item__m">8h left</span></span>
+                    <span class="item__s">Today 16:00 · Pre-op assessment v3 · invited, not started</span>
+                  </div>
+                  <div class="item">
+                    <span class="item__t"><span class="item__n">L. Fernandes</span><span class="item__m">32h left</span></span>
+                    <span class="item__s">Tomorrow · Appointment confirmation v2 · invite delivered</span>
+                  </div>
+                  <div class="item">
+                    <span class="item__t"><span class="item__n">R. Byrne</span><span class="item__m">20 Aug</span></span>
+                    <span class="item__s">Post-op check v1 · resumable, window still open</span>
+                  </div>
+                  <div class="item">
+                    <span class="item__t"><span class="item__n">K. Ellis</span><span class="item__m">4d left</span></span>
+                    <span class="item__s">22 Aug · Pre-op assessment v3 · scheduled</span>
+                  </div>
+                </div>
+                <div class="card__f">Manage in Deployments →</div>
+              </div>
+
+              <div class="px" id="px">
+                <div class="px__top">
+                  <div>
+                    <h4 class="px__t">Patient experience</h4>
+                    <p class="px__s">Asked only of patients who opted in. It measures how the interview went, never the patient.</p>
+                  </div>
+                  <div class="seg" role="group" aria-label="Time range">
+                    <button class="seg__b" type="button" data-r="today" aria-pressed="false">Today</button>
+                    <button class="seg__b seg__b--on" type="button" data-r="week" aria-pressed="true">Last week</button>
+                    <button class="seg__b" type="button" data-r="all" aria-pressed="false">Overall</button>
+                  </div>
+                </div>
+
+                <div class="px__stats" id="pxStats"></div>
+
+                <div>
+                  <div class="px__legend">
+                    <span class="lg lg--pos"><i></i>Positive · 4–5</span>
+                    <span class="lg lg--neu"><i></i>Neutral · 3</span>
+                    <span class="lg lg--neg"><i></i>Concerned · 1–2</span>
+                    <span id="pxScope">responses per day · last 7 days</span>
+                  </div>
+                  <div class="px__plot" id="pxPlot">
+                    <svg id="pxSvg" viewBox="0 0 720 216" role="img" aria-labelledby="pxTitle"><title id="pxTitle">Opt-in patient experience responses, split by sentiment</title><defs>
+                      <linearGradient id="pxSweep" x1="0" y1="1" x2="1" y2="0">
+                        <stop offset="0%" style="stop-color:var(--sw-1)"></stop>
+                        <stop offset="45%" style="stop-color:var(--sw-2)"></stop>
+                        <stop offset="100%" style="stop-color:var(--sw-3)"></stop>
+                      </linearGradient>
+                      <linearGradient id="pxSweepWarn" x1="0" y1="1" x2="1" y2="0">
+                        <stop offset="0%" style="stop-color:var(--sw-w1)"></stop>
+                        <stop offset="100%" style="stop-color:var(--sw-w2)"></stop>
+                      </linearGradient>
+                    </defs></svg>
+                    <div class="tip" id="pxTip" aria-hidden="true"></div>
+                  </div>
+                </div>
+
+                <details class="px__vals">
+                  <summary>Show the values</summary>
+                  <table id="pxTable"></table>
+                </details>
+                <span class="px__foot">Read the 33 verbatim responses →</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">
+      Everything above is running, not drawn. The experience panel is interactive: change the range and the
+      numbers and the chart move with it.
+    </p>
+
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">The patient record</p>
+      <h2>Read it where the patient's history is</h2>
+      <p>
+        The arrow on a review row opens the interview itself, sitting <em>inside the patient's context</em>,
+        with care team, consent and every previous interview across the top. The full profile is one click up
+        the breadcrumb.
+      </p>
+      <p class="goal">
+        <b>Goal:</b> everything you need to form an impression is on one screen: the patient's own words,
+        what was and was not captured, and what has happened to them before.
+      </p>
+    </div>
+
+    <div class="specimen">
+      <div class="specimen__bar"><span>Interview detail · review composer</span><span>View two</span></div>
+      <div class="specimen__body">
+        <div class="app">
+          <div class="chrome">
+            <span class="wordmark">threep.io</span>
+            <nav><span>Dashboard</span><b>Patients</b><span>Deployments</span></nav>
+            <span class="grow"></span><span class="kbd">⌘K</span>
+          </div>
+
+          <div class="rail">
+            <span class="rail__dot"></span>
+            <span class="rail__txt">
+              <span class="rail__t">2 escalations need a consultation scheduled</span>
+              <span class="rail__s">A. M. · “breathless walking upstairs, that’s new this month” · raised 04:12</span>
+            </span>
+            <span class="rail__c">06:41</span>
+          </div>
+
+          <div class="crumb"><span>Patients</span><i>›</i><b>A. Mitchell</b><i>›</i><span>Pre-op assessment v3 · 18 Aug 04:12</span></div>
+
+          <div class="dhead">
+            <span>
+              <span class="dhead__n">Amara Mitchell</span>
+              <span class="dhead__s">NHS ···· 447 · DOB 14 Mar 1971 · 54</span>
+            </span>
+            <span class="chips">
+              <span class="pill">responsible · Dr Hollis</span>
+              <span class="pill pill--done"><span class="chk">✓</span>consent · processing, recording</span>
+            </span>
+          </div>
+
+          <div class="tl" role="list" aria-label="Interview history, oldest first">
+            <span class="tl__i" role="listitem">
+              <span class="tl__node"></span><span class="tl__gap">8w</span>
+              <span class="tl__d">11 Apr</span><span class="tl__p">Post-op check v1</span>
+              <span class="pill pill--done"><span class="chk">✓</span>signed</span>
+            </span>
+            <span class="tl__i" role="listitem">
+              <span class="tl__node"></span><span class="tl__gap">2w</span>
+              <span class="tl__d">04 Jun</span><span class="tl__p">Pre-op assessment v2</span>
+              <span class="pill pill--warn">abandoned</span>
+            </span>
+            <span class="tl__i" role="listitem">
+              <span class="tl__node"></span><span class="tl__gap">6w</span>
+              <span class="tl__d">19 Jun</span><span class="tl__p">Medication review v2</span>
+              <span class="pill pill--done"><span class="chk">✓</span>signed</span>
+            </span>
+            <span class="tl__i" role="listitem">
+              <span class="tl__node"></span><span class="tl__gap">16d</span>
+              <span class="tl__d">02 Aug</span><span class="tl__p">Pre-op assessment v2</span>
+              <span class="pill pill--done"><span class="chk">✓</span>signed</span>
+            </span>
+            <span class="tl__i tl__i--now" role="listitem">
+              <span class="tl__node"></span>
+              <span class="tl__d">18 Aug · today</span><span class="tl__p">Pre-op assessment v3</span>
+              <span class="pill pill--danger"><span class="pill__d"></span>urgent review</span>
+              <span class="tl__owed">Awaiting your signature</span>
+            </span>
+          </div>
+
+          <div class="panes">
+            <div class="pane">
+              <div class="tabs">
+                <span class="tab tab--on">Transcript</span><span class="tab">Record 9/16</span>
+                <span class="tab">Ledger</span><span class="tab">Audio 2 tracks</span>
+              </div>
+              <div class="tline">
+                <span class="tline__t">04:11:38</span>
+                <span><span class="tline__w">Assistant</span><span class="tline__x">And how would you describe the pain itself?</span></span>
+              </div>
+              <div class="tline">
+                <span class="tline__t">04:11:52</span>
+                <span><span class="tline__w">Patient</span><span class="tline__x">It's a tight band, mostly behind my eyes, worse when I bend forward.</span>
+                <span class="scan">scan ran · 41 patterns · matched nothing</span></span>
+              </div>
+              <div class="tline">
+                <span class="tline__t">04:12:07</span>
+                <span><span class="tline__w">Patient</span><span class="tline__x">…and I've been getting breathless walking upstairs, that's new this month.</span>
+                <span class="scan scan--hit">scan ran · matched RF-04 functional decline · escalated · LLM invocations 0</span></span>
+              </div>
+              <div class="tline">
+                <span class="tline__t">04:12:07</span>
+                <span><span class="tline__w">Assistant · pre-rendered</span><span class="tline__x">Thank you. I'm going to stop the questions here and pass this to a clinician so they can arrange a consultation as soon as possible. Someone will contact you shortly.</span>
+                <span class="scan">no model, no synthesis · 400 ms</span></span>
+              </div>
+            </div>
+
+            <div class="cmp">
+              <div class="cmp__h">Review composer</div>
+              <div class="cmp__b">
+                <span><span class="fld__l">Issued summary · read-only from the ledger</span>
+                  <span class="fld__v fld__v--ro">54-year-old, pre-operative assessment for elective cholecystectomy. Interview terminated at 04:12 on a functional-decline flag; 9 of 16 declared items captured.</span></span>
+                <span><span class="fld__l">Clinical impression</span>
+                  <span class="fld__v fld__v--type">Type here…</span></span>
+                <span><span class="fld__l">Disposition</span>
+                  <span class="fld__v">same_day ▾</span></span>
+              </div>
+              <div class="sig">
+                <span class="sig__h">record 8f2a…c19b · ledger head 4d71…0ae3</span>
+                <div class="sig__r">
+                  <span class="sig__note">Signing is irreversible</span>
+                  <button class="btn-grad" type="button">Sign as Dr E. Hollis</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">
+      The transcript shows every check that ran, not only the one that fired, so you can see what was looked
+      for and cleared. The turn that escalated was decided by a fixed rule: no model was asked, and the
+      reply the patient heard was written in advance.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">Finding a patient</p>
+      <h2>Find a person, or take responsibility for one</h2>
+      <p>
+        Search sits on the screen that has a profile to land on, with your list beside it: who you are
+        responsible for, what came back from them last, and how much is still open.
+      </p>
+      <p class="goal">
+        <b>Goal:</b> reach the right patient in one search, and see at a glance who you are accountable
+        for and what is still outstanding on them.
+      </p>
+    </div>
+
+    <div class="specimen">
+      <div class="specimen__bar"><span>Patients</span><span>View two · list</span></div>
+      <div class="specimen__body">
+        <div class="app">
+          <div class="chrome">
+            <span class="wordmark">threep.io</span>
+            <nav><span>Dashboard</span><b>Patients</b><span>Deployments</span></nav>
+            <span class="grow"></span><span class="kbd">⌘K</span>
+          </div>
+
+          <div class="page">
+            <div class="greet">
+              <b>Patients</b>
+              <span>12 assigned · 5 with something open</span>
+            </div>
+
+            <div class="panel">
+              <div class="toolbar">
+                <span class="ctl ctl--search">NHS number, or name + DOB</span>
+                <span class="ctl">Sort <b>open items</b> ↓</span>
+                <span class="grow"></span>
+                <button class="btn-grad" type="button">Add patient</button>
+              </div>
+
+              <table class="dt">
+                <colgroup><col style="width:32%"><col style="width:30%"><col style="width:20%"><col style="width:18%"></colgroup>
+                <thead>
+                  <tr><th>Patient</th><th>Last interview</th><th>Next scheduled</th><th class="sorted">Open ↓</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="who">Amara Mitchell</span><span class="sub mono">NHS ···· 447 · 14 Mar 1971</span></td>
+                    <td>Pre-op assessment <span class="ver">v3</span><span class="rel">18 Aug · urgent escalation, consultation not scheduled</span></td>
+                    <td>–<span class="rel">nothing pending</span></td>
+                    <td><span class="status"><span class="pill pill--danger">2 open</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">Joseph Okafor</span><span class="sub mono">NHS ···· 118 · 09 Nov 1958</span></td>
+                    <td>Pre-op assessment <span class="ver">v3</span><span class="rel">17 Aug · completed</span></td>
+                    <td>–<span class="rel">nothing pending</span></td>
+                    <td><span class="status"><span class="pill pill--accent">1 open</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">Rhona Byrne</span><span class="sub mono">NHS ···· 550 · 22 Jul 1983</span></td>
+                    <td>Post-op check <span class="ver">v1</span><span class="rel">17 Aug · abandoned at 4 min</span></td>
+                    <td>20 Aug<span class="rel">resumable, window open</span></td>
+                    <td><span class="status"><span class="pill pill--warn">1 open</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">Sade Adeyemi</span><span class="sub mono">NHS ···· 073 · 30 Jan 1990</span></td>
+                    <td>Medication review <span class="ver">v2</span><span class="rel">17 Aug · verification locked</span></td>
+                    <td>–<span class="rel">resend pending</span></td>
+                    <td><span class="status"><span class="pill pill--warn">1 open</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">Peter Nowak</span><span class="sub mono">NHS ···· 219 · 03 Dec 1966</span></td>
+                    <td>Pre-op assessment <span class="ver">v3</span><span class="rel">02 Aug · signed by Dr Hollis</span></td>
+                    <td>Today 16:00<span class="rel">invited, not started</span></td>
+                    <td><span class="status"><span class="pill pill--faint">none</span><span class="act-link">→</span></span></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="pager">
+                <span>showing 1–5 of 12</span>
+                <span class="pages"><span class="pg pg--off">‹</span><span class="pg pg--on">1</span><span class="pg">2</span><span class="pg">3</span><span class="pg">›</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">
+      Search a patient you have no assignment to and you get their identity, nothing more; taking them on
+      asks you to type a reason first. <strong>Add patient</strong> only appears once a search has come back
+      empty.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">Deployments</p>
+      <h2>Four choices, and then it goes out</h2>
+      <p>
+        Sending an interview is one decision made four times: <em>who, what, when, how.</em> A patient, a
+        call type, a slot, and how the call reaches them. Everything else, the wording, the version and the
+        escalation set, is settled before this screen and is not a clinician's choice.
+      </p>
+      <p>
+        One patient at a time. There is no batch, no cohort and no list upload, because the moment a send
+        covers twelve people it stops being a clinical decision and becomes an administrative one.
+      </p>
+      <p class="goal">
+        <b>Goal:</b> sending an interview takes four decisions and no training, and every call you have
+        booked stays in front of you until it goes out.
+      </p>
+    </div>
+
+    <div class="specimen">
+      <div class="specimen__bar"><span>Deployments · send and follow</span><span>View three</span></div>
+      <div class="specimen__body">
+        <div class="app">
+          <div class="chrome">
+            <span class="wordmark">threep.io</span>
+            <nav><span>Dashboard</span><span>Patients</span><b>Deployments</b></nav>
+            <span class="grow"></span><span class="kbd">⌘K</span>
+          </div>
+
+          <div class="page">
+            <div class="greet">
+              <b>Deployments</b>
+              <span>5 calls upcoming · 1 needs a working number · counts updated 14 s ago</span>
+            </div>
+
+            <div class="panel">
+              <div class="toolbar">
+                <span class="toolbar__t">Send an interview</span>
+                <span class="toolbar__c">nothing sent until you press send</span>
+              </div>
+              <div class="dep">
+                <span class="fld"><span class="fld__l">Who · patient</span>
+                  <span class="fld__v fld__v--sel">M. Haddad ▾<u>NHS ···· 118</u></span></span>
+                <span class="fld"><span class="fld__l">What · call type</span>
+                  <span class="fld__v fld__v--sel">Pre-op assessment ▾<u>v3</u></span></span>
+                <span class="fld"><span class="fld__l">When · slot</span>
+                  <span class="fld__v fld__v--sel">Thu 21 Aug, 09:00 ▾<u>30 min</u></span></span>
+                <span class="fld"><span class="fld__l">How · delivery</span>
+                  <span class="fld__v fld__v--sel">Voice call ▾<u>mobile</u></span></span>
+              </div>
+              <div class="send">
+                <span class="send__t">
+                  <b>threep.io will call M. Haddad on Thursday at 09:00.</b> If they do not answer it tries
+                  twice more within the hour, then tells you. Nothing is sent to anyone else.
+                </span>
+                <button class="btn-grad" type="button">Send</button>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="toolbar">
+                <span class="toolbar__t">Upcoming</span>
+                <span class="toolbar__c">5 in the next 7 days</span>
+                <span class="grow"></span>
+                <span class="ctl ctl--search">Search patient</span>
+                <span class="ctl">Sort <b>slot</b> ↑</span>
+              </div>
+              <table class="dt">
+                <colgroup><col style="width:22%"><col style="width:22%"><col style="width:20%"><col style="width:16%"><col style="width:20%"></colgroup>
+                <thead>
+                  <tr><th>Patient</th><th>Call type</th><th class="sorted">Slot ↑</th><th>Delivery</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="who">P. Nowak</span><span class="sub mono">NHS ···· 314</span></td>
+                    <td>Pre-op assessment <span class="ver">v3</span></td>
+                    <td class="mono">18 Aug 16:00<span class="sub">in 6h 46m</span></td>
+                    <td>Voice call</td>
+                    <td><span class="status"><span class="pill">scheduled</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">L. Fernandes</span><span class="sub mono">NHS ···· 688</span></td>
+                    <td>Appointment confirmation <span class="ver">v2</span></td>
+                    <td class="mono">19 Aug 11:15<span class="sub">tomorrow</span></td>
+                    <td>SMS link</td>
+                    <td><span class="status"><span class="pill">invite delivered</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">S. Adeyemi</span><span class="sub mono">NHS ···· 073</span></td>
+                    <td>Appointment confirmation <span class="ver">v2</span></td>
+                    <td class="mono">19 Aug 15:30<span class="sub">tomorrow</span></td>
+                    <td>SMS link</td>
+                    <td><span class="status"><span class="pill pill--warn">number unreachable</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">R. Byrne</span><span class="sub mono">NHS ···· 550</span></td>
+                    <td>Post-op check <span class="ver">v1</span></td>
+                    <td class="mono">20 Aug 10:00<span class="sub">in 2d · resumable</span></td>
+                    <td>SMS link</td>
+                    <td><span class="status"><span class="pill">window open</span><span class="act-link">→</span></span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="who">K. Ellis</span><span class="sub mono">NHS ···· 526</span></td>
+                    <td>Pre-op assessment <span class="ver">v3</span></td>
+                    <td class="mono">22 Aug 10:30<span class="sub">in 4d</span></td>
+                    <td>Voice call</td>
+                    <td><span class="status"><span class="pill">scheduled</span><span class="act-link">→</span></span></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="pager">
+                <span>showing all 5 upcoming · M. Haddad appears once sent</span>
+                <span class="pages">calls that have come back are on the dashboard →</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">
+      One row per call still to happen, and the columns are the four choices you made. A booked slot reads as
+      neutral; the only colour is a call that cannot go out as booked. Interviews that have already come back
+      belong to the dashboard, not here.
+    </p>
+  </div>
+</section>
+
+
+<div class="bleed bleed--rule"></div>
+<footer>
+  <div class="wrap">
+    <span>threep.io · clinical voice intake</span>
+    <span>Interface design for review</span>
+    <span>Every decision on this page belongs to a named clinician</span>
+  </div>
+</footer>
+
+<script>
+/* Patient experience · one chart, three ranges.
+   The columns are counts, not scores. An average hides the thing a clinician
+   needs from this panel: whether anyone answered at all, and whether the
+   concerned tail is growing. Volume is the shape; sentiment is the fill. */
+(function(){
+  var NS = "http://www.w3.org/2000/svg";
+  var DATA = {
+    today: {
+      scope: "responses per 2 hours · today",
+      bars: [["08:00",1,0,0],["10:00",2,0,0],["12:00",0,0,0],["14:00",1,1,0],["16:00",0,0,1],["18:00",0,0,0]],
+      stats: [
+        {l:"Average score", n:"4.4", u:"/5", d:"5 responses · <b>+0.2</b> on yesterday"},
+        {l:"Response rate", n:"71", u:"%", d:"5 of 7 patients asked"},
+        {l:"Would use again", n:"100", u:"%", d:"5 of 5 who answered"}
+      ],
+      foot: "Read the 5 verbatim responses →"
+    },
+    week: {
+      scope: "responses per day · last 7 days",
+      bars: [["Mon",5,1,0],["Tue",4,1,1],["Wed",2,1,2],["Thu",7,1,0],["Fri",3,0,0],["Sat",1,1,0],["Sun",2,0,1]],
+      stats: [
+        {l:"Average score", n:"4.2", u:"/5", d:"33 responses · <b>+0.1</b> on the week before"},
+        {l:"Response rate", n:"62", u:"%", d:"33 of 53 patients asked"},
+        {l:"Would use again", n:"87", u:"%", d:"29 of 33 who answered"}
+      ],
+      foot: "Read the 33 verbatim responses →"
+    },
+    all: {
+      scope: "responses per week · since 30 June",
+      bars: [["W27",14,4,3],["W28",18,3,2],["W29",11,5,5],["W30",22,4,2],["W31",19,6,3],["W32",25,3,1],["W33",16,5,4],["W34",21,4,2]],
+      stats: [
+        {l:"Average score", n:"4.1", u:"/5", d:"204 responses across 8 weeks"},
+        {l:"Response rate", n:"58", u:"%", d:"204 of 352 patients asked"},
+        {l:"Would use again", n:"84", u:"%", d:"171 of 204 who answered"}
+      ],
+      foot: "Read the 204 verbatim responses →"
+    }
+  };
+
+  var svg = document.getElementById("pxSvg"),
+      plot = document.getElementById("pxPlot"),
+      tip = document.getElementById("pxTip"),
+      statsEl = document.getElementById("pxStats"),
+      scopeEl = document.getElementById("pxScope"),
+      tableEl = document.getElementById("pxTable"),
+      footEl = document.querySelector("#px .px__foot"),
+      seg = document.querySelectorAll("#px .seg__b");
+  if(!svg) return;
+
+  /* MAXW is in viewBox units: the plot renders ~1.4x, so 18 lands the bar at
+     the 24px ceiling on a wide specimen and ~21px on the narrowest one. */
+  var W = 720, H = 216, TOP = 24, BASE = 176, L = 6, R = 714, GAP = 2, MAXW = 18;
+  /* f = the SVG fill (a gradient needs a paint-server ref, not a CSS value)
+     s = the CSS background for the tooltip swatch, which mirrors it */
+  var KEYS = [
+    {i:1, n:"Positive",  f:"url(#pxSweep)",     s:"var(--sweep)"},
+    {i:2, n:"Neutral",   f:"var(--px-neu)",     s:"var(--px-neu)"},
+    {i:3, n:"Concerned", f:"url(#pxSweepWarn)", s:"var(--sweep-warn)"}
+  ];
+
+  function el(name, attrs){
+    var n = document.createElementNS(NS, name);
+    for(var k in attrs){ n.setAttribute(k, attrs[k]); }
+    return n;
+  }
+  /* square at the baseline, 4px rounded at the data end */
+  function capPath(x, y, w, h, r){
+    r = Math.min(r, w/2, h);
+    return "M"+x+" "+(y+h)+"V"+(y+r)+"a"+r+" "+r+" 0 0 1 "+r+" "+(-r)+"h"+(w-2*r)+"a"+r+" "+r+" 0 0 1 "+r+" "+r+"V"+(y+h)+"Z";
+  }
+
+  function render(key){
+    var d = DATA[key], bars = d.bars, n = bars.length;
+    while(svg.childNodes.length > 2) svg.removeChild(svg.lastChild); /* keep <title> and <defs> */
+
+    var totals = bars.map(function(b){ return b[1]+b[2]+b[3]; });
+    var max = Math.max.apply(null, totals) || 1;
+    var step = max <= 8 ? 2 : max <= 20 ? 5 : 10;
+    var top = Math.ceil(max/step)*step;
+    var band = (R - L) / n;
+    var bw = Math.min(MAXW, band * 0.52);
+    var scale = function(v){ return (BASE - TOP) * (v / top); };
+
+    svg.appendChild(el("line", {x1:L, y1:BASE+.5, x2:R, y2:BASE+.5, "class":"base"}));
+
+    bars.forEach(function(b, i){
+      var cx = L + band*i + band/2, x = cx - bw/2, total = b[1]+b[2]+b[3];
+      var hit = el("rect", {x:L+band*i, y:TOP-14, width:band, height:BASE-TOP+28, "class":"hit"});
+      hit.setAttribute("data-i", i);
+      svg.appendChild(hit);
+
+      var y = BASE;
+      KEYS.forEach(function(k, ki){
+        var v = b[k.i]; if(!v) return;
+        var h = scale(v);
+        var isTop = KEYS.slice(ki+1).every(function(kk){ return !b[kk.i]; });
+        var hh = Math.max(h - (ki === 0 ? 0 : GAP), 2);
+        var yy = y - hh;
+        var node = isTop
+          ? el("path", {d: capPath(x, yy, bw, hh, 3), fill:k.f})
+          : el("rect", {x:x, y:yy, width:bw, height:hh, fill:k.f});
+        svg.appendChild(node);
+        y -= h;
+      });
+
+      /* the count rides the cap: the visible label that carries the values
+         colour alone should never have to */
+      var cap = el("text", {x:cx, y:(total ? y - 8 : BASE - 8), "text-anchor":"middle",
+                            "class": total ? "cap" : "cap cap--zero"});
+      cap.textContent = total ? total : "0";
+      svg.appendChild(cap);
+
+      var lab = el("text", {x:cx, y:BASE+20, "text-anchor":"middle", "class":"gx"});
+      lab.textContent = b[0];
+      svg.appendChild(lab);
+    });
+
+    /* stats */
+    statsEl.innerHTML = d.stats.map(function(s){
+      return '<span class="pxs"><span class="pxs__l">'+s.l+'</span>'+
+             '<span class="pxs__n">'+s.n+'<u>'+s.u+'</u></span>'+
+             '<span class="pxs__d">'+s.d+'</span></span>';
+    }).join("");
+
+    scopeEl.textContent = d.scope;
+    footEl.textContent = d.foot;
+
+    tableEl.innerHTML =
+      "<thead><tr><th>"+(key==="today"?"Time":key==="week"?"Day":"Week")+
+      "</th><th>Positive</th><th>Neutral</th><th>Concerned</th><th>Total</th></tr></thead><tbody>"+
+      bars.map(function(b){
+        return "<tr><td>"+b[0]+"</td><td>"+b[1]+"</td><td>"+b[2]+"</td><td>"+b[3]+"</td><td>"+(b[1]+b[2]+b[3])+"</td></tr>";
+      }).join("")+"</tbody>";
+
+    svg.__bars = bars; svg.__band = band;
+  }
+
+  function showTip(i){
+    var b = svg.__bars[i], total = b[1]+b[2]+b[3];
+    var w = plot.getBoundingClientRect().width;
+    var px = (svg.__band * i + svg.__band/2 + 6) / W * w;
+    tip.innerHTML = "<b>"+b[0]+" · "+total+(total===1?" response":" responses")+"</b>"+
+      (total ? KEYS.map(function(k){
+        return b[k.i] ? '<span><i style="background:'+k.s+'"></i>'+k.n+" · "+b[k.i]+"</span>" : "";
+      }).join("") : "<span>Nobody answered in this window</span>");
+    /* keep it inside the plot at both edges rather than letting it clip */
+    tip.style.left = Math.max(72, Math.min(w - 72, px)) + "px";
+    tip.classList.add("tip--on");
+  }
+  function hideTip(){ tip.classList.remove("tip--on"); }
+
+  svg.addEventListener("mouseover", function(e){
+    var t = e.target;
+    if(t.classList && t.classList.contains("hit")) showTip(+t.getAttribute("data-i"));
+  });
+  svg.addEventListener("mouseleave", hideTip);
+
+  Array.prototype.forEach.call(seg, function(btn){
+    btn.addEventListener("click", function(){
+      Array.prototype.forEach.call(seg, function(b){
+        b.classList.toggle("seg__b--on", b === btn);
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+      });
+      hideTip();
+      render(btn.getAttribute("data-r"));
+    });
+  });
+
+  render("week");
+})();
+</script>
