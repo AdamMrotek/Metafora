@@ -5,6 +5,16 @@
 - **Author:** Adam Mrotek
 - **Supersedes if adopted:** the OpenAI Realtime transport described in `README.md`; leaves [ADR 0001](adr/0001-backend-owned-state-machine.md) intact and, as argued below, strengthens it
 
+> **Where this landed.** This note was written before the code existed and uses
+> the names the prototype had — `backend/`, one process, one folder. Phase 1 is
+> built, and it lives under `services/`: the audio loop, safety gate and state
+> machine in `services/agent`, the WebRTC transport in `services/media`, the
+> HTTP surface in `services/core`. The proposal's `scan.ts` is
+> `services/agent/src/safety/scan.ts`. See [`system-map.md`](./system-map.md)
+> for the shape it grew into, and
+> [`../services/agent/docs/inference-corrections.md`](../services/agent/docs/inference-corrections.md)
+> for where the inference table below is stale.
+
 ## Why change anything
 
 The prototype works. The browser opens a WebRTC connection straight to OpenAI's Realtime API, the backend mints an ephemeral key and then sits to the side receiving tool calls over the data channel. It is the lowest-latency thing you can build and it took very little code.

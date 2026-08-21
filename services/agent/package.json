@@ -1,0 +1,22 @@
+{
+  "name": "@metafora/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "node --test --import tsx ./src/**/*.test.ts",
+    "bench": "tsx --env-file-if-exists=../../.env src/bench.ts"
+  },
+  "dependencies": {
+    "@metafora/contracts": "*",
+    "@metafora/media": "*",
+    "onnxruntime-node": "^1.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.2"
+  }
+}

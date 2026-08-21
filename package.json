@@ -1,0 +1,28 @@
+{
+  "name": "metafora",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "shared/contracts",
+    "shared/auth",
+    "frontend/shared",
+    "frontend/call",
+    "services/media",
+    "services/agent",
+    "services/core",
+    "services/comms"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@metafora/core & npm run dev --workspace=@metafora/call",
+    "dev:core": "npm run dev --workspace=@metafora/core",
+    "dev:call": "npm run dev --workspace=@metafora/call",
+    "livekit": "livekit-server --dev",
+    "test": "npm run test --workspace=@metafora/agent",
+    "typecheck": "tsc -b shared/contracts services/media services/agent services/core frontend/call",
+    "bench": "npm run bench --workspace=@metafora/agent"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
