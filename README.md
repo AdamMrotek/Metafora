@@ -60,13 +60,22 @@ npm install                   # frontend only
 cp .env.example .env          # then put your GROQ_API_KEY in it
 ```
 
-Three terminals:
+All three at once, in one terminal — ctrl-c stops all of them:
 
 ```bash
-uv run python -m services.core.app   # the whole backend, on :3000
-livekit-server --dev                 # SFU on :7880
-npm run dev:call                     # patient portal, on :5173
+make dev
 ```
+
+Or a terminal each, if you'd rather read the logs apart:
+
+```bash
+uv run python -m services.core.app   # the whole backend, on :3000  (make api)
+livekit-server --dev                 # SFU on :7880                 (make sfu)
+npm run dev:call                     # patient portal, on :5173     (make web)
+```
+
+`make help` lists the rest — `make stop` frees the dev ports when something is
+still holding one, `make check` runs everything below in one go.
 
 Open <http://localhost:5173> and tap **Start the conversation** once. That is
 the only tap in the interview.
@@ -76,19 +85,13 @@ the only tap in the interview.
 ```bash
 uv run pytest                  # 73 tests — no API key, no LiveKit needed
 uv run ruff check .            # lint
-uv run lint-imports            # the write boundary: agent never imports the store
 npm run typecheck              # frontend + the generated contracts
 npm run build:call             # production build of the patient portal
 ```
 
-Two guarantees arrived with the migration. `tests/test_contracts_generated.py`
-fails if `shared/contracts/src/*.ts` is stale — the TypeScript is generated
-from the pydantic models and never hand-mirrored. And `.importlinter`, run by
-`lint-imports`, enforces that the bot's only handle on storage is a
-per-session `SessionWriter` closed over one patient (§8 of the decision doc).
-TypeScript enforced that second one for free, by `services/agent` simply not
-listing the store in its `package.json`; Python has no equivalent, so it is
-declared and checked rather than assumed.
+`tests/test_contracts_generated.py` fails if `shared/contracts/src/*.ts` is
+stale — the TypeScript is generated from the pydantic models and never
+hand-mirrored.
 
 There is also an end-to-end harness that needs a live backend and a real key:
 
@@ -110,8 +113,8 @@ uv run python scripts/gen_contracts.py
 > 429.
 
 Each call writes `logs/<sessionId>.jsonl` — both sides of the conversation,
-every state transition, every safety decision, per-turn latency. Raw audio is
-not retained.
+every state transition, every safety decision, per-turn latency. Audio
+recording is not wired up yet.
 
 ```bash
 jq -c 'select(.type=="latency.turn")' logs/*.jsonl

@@ -141,8 +141,8 @@ here rather than in code.
    denial decided by a row policy is indistinguishable from a record that does not exist, which is
    the wrong thing to hand a clinician looking for a patient.
 2. **A service writes the store it produced — `svc-agent` the transcript — and every other
-   write goes through `svc-core`.** (The audio leg died with `svc-media`; raw audio is not
-   retained at all today.)
+   write goes through `svc-core`.** (The audio leg died with `svc-media`; nothing writes
+   `store-media` today, though clinical-research requirements may bring audio retention back.)
 3. **`app-call` holds no account credential.** A patient arrives with a link. It is a different
    auth posture from the rest of the product and it stays that way.
 4. **Everything leaving the perimeter goes through `svc-comms`.** One place to audit, one place

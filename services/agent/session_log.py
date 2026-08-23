@@ -8,9 +8,9 @@ of every turn. Append-only JSONL keeps it greppable and defers the database
 decision. The interface is the point — swapping in SQLite or Postgres later is
 one new implementation, not a migration of the pipeline.
 
-Raw audio is deliberately not retained: transcripts and state transitions only.
-Whether that changes is a DPIA decision, and not retaining is the reversible
-default.
+This log holds transcripts and state transitions. Audio capture is a separate
+concern and is not wired up here; if clinical-research requirements call for
+retained recordings, they belong in their own store, not in this file.
 """
 
 import json
@@ -170,11 +170,6 @@ class SessionWriter(Protocol):
     constructed per session by `services.core` with the id closed over, and the
     pipeline holds it for the length of the call. The bot cannot name a
     different patient because it has no way to spell one.
-
-    TypeScript enforced this for free — `services/agent` simply would not have
-    listed the store in its `package.json`. Python has no equivalent, so the
-    boundary is declared here and checked by import-linter in CI. We noticed
-    the language would not enforce it and did not assume it away.
 
     `note_end_reason` is the other side of the same coin: when the bot ends the
     call itself (interview complete, safety closure) the store — not the bot —

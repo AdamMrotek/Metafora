@@ -6,8 +6,8 @@ for phase 1: this process is already stateful because it holds live WebRTC
 connections, so persisting the record without also solving mid-call restart
 would buy nothing. The log on disk is the durable artefact.
 
-`services.agent` must never import this module — see `.importlinter`. The bot
-receives a `SessionWriter` closed over one patient and nothing else.
+`services.agent` does not import this module. The bot receives a
+`SessionWriter` closed over one patient and nothing else.
 """
 
 import uuid
