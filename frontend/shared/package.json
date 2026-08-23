@@ -4,6 +4,25 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./tokens.css": "./tokens.css"
+    ".": "./src/index.ts",
+    "./tokens.css": "./tokens.css",
+    "./ui.css": "./src/ui.css"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "dev": "vite --config vite.config.ts",
+    "build": "vite build --config vite.config.ts"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.0"
   }
 }

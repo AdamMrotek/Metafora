@@ -1,9 +1,15 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   Lifted verbatim from ux-patient-portal.html.
-   The patient and the clinician are looking at two halves of one interview,
-   and the day a screenshot of one lands next to the other they must read as
+   THE TOKEN FILE · one token set for all three surfaces
+   Lifted verbatim from ux-patient-portal.html, ux-clinical-dashboard.html
+   and ux-agent-studio.html. "The three screens share one token file on
+   purpose": a screenshot of any two of them landing side by side must read as
    the same product. So nothing is re-picked here — this file is the design
    spec, moved rather than reinterpreted.
+
+   The patient portal spec contributes the base set; the clinician portal and
+   the agent studio add the danger ramp (gradient, soft/line surfaces) and the
+   amber warning sweep (--sw-w1/--sw-w2, --sweep-warn) plus the theme-stable
+   neutral data mark (--px-neu).
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root{
@@ -51,7 +57,18 @@
   --warn:var(--a-600); --warn-fg:var(--a-800);
   --warn-soft:rgba(217,119,6,.09); --warn-line:rgba(217,119,6,.3);
 
+  /* the danger ramp · clinical + studio surfaces. The gradient is NOT
+     lightened in dark: the surface that hands a clinician an urgent review
+     does not get to fail AA because it looked better on a dark page. */
+  --danger-grad:linear-gradient(100deg,var(--r-700) 0%,var(--r-600) 55%,var(--r-rose) 100%);
+  --danger:var(--r-600); --danger-fg:var(--r-700); --danger-on:#fff;
+  --danger-soft:rgba(220,38,38,.07); --danger-line:rgba(220,38,38,.26);
+
   --sw-1:#0b8478; --sw-2:#0a7f8e; --sw-3:#0a80a1;
+  --sw-w1:#d97706; --sw-w2:#c2410c;
+  /* the neutral data mark does NOT sweep, in either theme: it is the absence
+     of a side, and a gradient would give it one. */
+  --px-neu:var(--n-400);
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
@@ -65,7 +82,10 @@
     --accent-soft:rgba(94,234,212,.11); --accent-line:rgba(94,234,212,.32);
     --warn:var(--a-400); --warn-fg:var(--a-300);
     --warn-soft:rgba(251,191,36,.1); --warn-line:rgba(251,191,36,.3);
+    --danger:var(--r-500); --danger-fg:var(--r-400);
+    --danger-soft:rgba(248,113,113,.11); --danger-line:rgba(248,113,113,.3);
     --sw-1:#5eead4; --sw-2:#62e9e6; --sw-3:#67e8f9;
+    --sw-w1:#fbbf24; --sw-w2:#f59e0b;
   }
 }
 :root[data-theme="dark"]{
@@ -82,6 +102,7 @@
   --sw-1:#5eead4; --sw-2:#62e9e6; --sw-3:#67e8f9;
 }
 :root{--sweep:linear-gradient(100deg,var(--sw-1) 0%,var(--sw-2) 45%,var(--sw-3) 100%)}
+:root{--sweep-warn:linear-gradient(100deg,var(--sw-w1) 0%,var(--sw-w2) 100%)}
 
 /* ─── base ──────────────────────────────────────────────────────────────── */
 *{box-sizing:border-box}

@@ -1,0 +1,37 @@
+[project]
+name = "metafora"
+version = "0.1.0"
+description = "Clinical voice intake — one Python backend"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pipecat-ai[livekit,groq,silero]>=1.7.0",
+    "livekit-api>=1.0.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.9",
+    "loguru>=0.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "import-linter>=2.1",
+    "ruff>=0.8",
+]
+
+# Not a distributable package — one app, run from the repo root.
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

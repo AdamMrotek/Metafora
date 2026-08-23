@@ -5,3 +5,11 @@ logs/*.jsonl
 .env.local
 *.tsbuildinfo
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/

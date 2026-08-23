@@ -5,14 +5,17 @@ other. High level on purpose: no technologies are chosen here, no schemas, no en
 vendors. Each piece gets its own folder (§2); this page is the index they hang off.
 
 **Status:** draft · living document. Edit it whenever a piece is added, renamed, merged or
-dropped. It should stay roughly this length.
+dropped. It should stay roughly this length. The Python migration
+([`agent-review-and-pipecat-decision.md`](./agent-review-and-pipecat-decision.md))
+merged `svc-core` and `svc-agent` into one process and deleted `svc-media`; this page reflects
+that shape.
 
 ---
 
 ## 1 · The pieces
 
-Three things a person opens, four things that run, five places data rests, two ways we reach a
-patient off-platform.
+Three things a person opens, two things that run today, five places data rests, two ways we
+reach a patient off-platform.
 
 ### Apps — what a browser loads
 
@@ -32,16 +35,22 @@ patient off-platform.
 
 ### Services — what runs continuously
 
-**Where they run:** `svc-core` and `svc-agent` are hosted on one server, and `svc-comms` is part of that same core server; `svc-media` is the connection service and runs separately.
+**Where they run:** `svc-core` and `svc-agent` are one Python process, and `svc-comms` is part
+of that same process; `svc-media` was deleted by the migration — its job became a transport
+inside the agent process, so it runs wherever the backend runs.
 
-**How they connect:** everything a *person* does goes through `svc-core`, which is what keeps permissions in one place. Two things bypass it: live audio, straight to `svc-media`, and a service recording what it produced itself — `svc-agent` writes its own transcript, `svc-media` its own audio. Neither of those is anyone's request for data, so neither needs a permission check standing in front of it.
+**How they connect:** everything a *person* does goes through `svc-core`, which is what keeps
+permissions in one place. Two things bypass it: live audio, which terminates at the transport
+inside the agent process, and a service recording what it produced itself — `svc-agent` writes
+its own transcript. Neither of those is anyone's request for data, so neither needs a
+permission check standing in front of it.
 
 | Piece | Job | Talks to |
 |---|---|---|
 | `svc-core` | Reads and writes everything the dashboard and studio show: accounts, patients, interview definitions, results, transcripts, eval runs. The boring one, and the one that owns permissions. It also **pushes** the things that cannot wait to be asked for — an escalation raised mid-interview has to reach a clinician in seconds. | `store-clinical`, `store-config`, `store-transcript` (reads, never writes), `app-dashboard` |
-| `svc-agent` | Runs a conversation. Fetches the interview definition, speaks with the patient, decides what to ask next, and **writes the transcript itself**, turn by turn, as the call happens. Two things it does not write but reports to `svc-core`: an escalation, the moment something cannot wait for the end of the call, and the interview's clinical outcome at the end. | `svc-media`, `svc-core`, `store-transcript`, `store-metrics` |
-| `svc-media` | **The only thing a patient ever connects to** — browser or phone. Terminates the connection, carries the audio, and lets an agent session attach and re-attach to it. Transport only: no clinical logic, and it never sees a transcript. | `app-call`, telephony, `svc-agent`, `store-media` |
-| `svc-comms` | Everything that leaves our perimeter to reach a patient: invitation emails, reminders, scheduling. It **places** a call and hands it to `svc-media`; it never carries one. Control plane, not data plane. | email + telephony providers |
+| `svc-agent` | Runs a conversation. Fetches the interview definition, speaks with the patient, decides what to ask next, and **writes the transcript itself**, turn by turn, as the call happens. The transport the patient connects to lives here now. Two things it does not write but reports to `svc-core`: an escalation, the moment something cannot wait for the end of the call, and the interview's clinical outcome at the end. | `svc-core`, `store-transcript`, `store-metrics` |
+| `svc-media` | **Deleted by the migration.** The connection service became a transport inside `svc-agent`, so nothing on this row exists as its own piece any more. The patient still connects to the same endpoint. | — |
+| `svc-comms` | Everything that leaves our perimeter to reach a patient: invitation emails, reminders, scheduling. It **places** a call and hands it to the media path; it never carries one. Control plane, not data plane. | email + telephony providers |
 
 ### Stores — where data rests
 
@@ -86,13 +95,12 @@ metafora.care/
 |
 |-- shared/              base level, because both sides use it
 |   |-- auth/            what a role is and what it grants, plus session handling
-|   `-- contracts/       the shapes passed between pieces. One definition, both sides
+|   `-- contracts/       the shapes passed between pieces. One definition, both sides — owned by Python now, TypeScript generated |
 |
-|-- services/            what runs continuously
-|   |-- core/            permissions, and every read and write the dashboard and studio make
-|   |-- agent/           the conversation loop: ask, listen, decide, checkpoint
-|   |-- media/           connection handling and audio transport. No clinical logic
-|   `-- comms/           anything that leaves the perimeter: email, placing a call
+|-- services/            one Python project, one process (see the migration decision)
+|   |-- core/            session lifecycle HTTP, permissions, store access, dispatch queue
+|   |-- agent/           the conversation loop: transport, ask, listen, decide, checkpoint
+|   `-- comms/           anything that leaves the perimeter: email, placing a call (unstarted)
 |
 |-- db/                  one folder of migrations per store
 |   |-- clinical/
@@ -100,12 +108,17 @@ metafora.care/
 |   |-- config/
 |   `-- metrics/
 |
-`-- docs/                this page, and anything spanning more than one piece
+`-- docs/                every document in the project
+    |-- system-map.md    this page
+    |-- pieces.md        what of each piece exists today, and how it is built
+    `-- ux/              the frozen design specs, one per app
 ```
 
-Every app and service folder holds `docs/` and `src/`, and a piece's documentation lives
-**inside its own folder**: what it is and who it is for, the screens it presents (apps only), and
-how it is actually built — that last one the only place a technology choice is allowed to appear.
+**All documentation lives in `docs/`, and nowhere else.** An app or service folder holds `src/`
+and no prose, so there is exactly one place to look and exactly one place a fact can go stale.
+The cut between the two main pages is what a page is *allowed* to say: this one is the shape and
+the rules and names no technologies; [`pieces.md`](./pieces.md) is the state of the build and is
+the only place a technology choice may appear.
 
 **Schema and migrations.** A migration is owned by the **store**, not by whichever service
 happens to be its only writer today, which is why `db/` is a peer of the others rather than
@@ -127,8 +140,9 @@ here rather than in code.
    tenant boundary and nothing finer. A denial decided in `svc-core` can be logged and explained; a
    denial decided by a row policy is indistinguishable from a record that does not exist, which is
    the wrong thing to hand a clinician looking for a patient.
-2. **A service writes the store it produced — `svc-agent` the transcript, `svc-media` the audio
-   — and every other write goes through `svc-core`.**
+2. **A service writes the store it produced — `svc-agent` the transcript — and every other
+   write goes through `svc-core`.** (The audio leg died with `svc-media`; raw audio is not
+   retained at all today.)
 3. **`app-call` holds no account credential.** A patient arrives with a link. It is a different
    auth posture from the rest of the product and it stays that way.
 4. **Everything leaving the perimeter goes through `svc-comms`.** One place to audit, one place
@@ -144,17 +158,18 @@ here rather than in code.
 
 ### Two legs, so one can fail
 
-Every patient connection terminates at `svc-media`, and the call is two legs — patient to edge,
-edge to agent session. A call terminating on the agent host would die with it, a hundred at a
-time; split this way the agent leg can break and re-form underneath a held line, so an agent host
-dying is a pause rather than a dial tone.
+Every patient connection terminates at the transport inside the agent process. The call is two
+legs — patient to edge, edge to agent session — and the migration merged them onto one host and
+accepted the cost of that (§6 of the decision doc): a crash in the backend takes every call on
+it. What the split still buys is that the agent leg can break and re-form underneath a held
+line, so a failing pipeline is a pause rather than a dial tone.
 
 ### Attach and resume
 
 The mechanism itself belongs to `svc-agent`. What belongs on this page is only what it obliges
 *other* pieces to do:
 
-- **`svc-media` mints and holds the session id.** Identity has to sit on the leg that survives, so
+- **The backend mints and holds the session id.** Identity has to sit on the leg that survives, so
   the thing that answers *new call or continuation* is owned by the edge.
 - **`store-transcript` enforces the write fence.** Rejecting a stale attach is a property of the
   store, not a convention between agent hosts.

@@ -1,0 +1,49 @@
+# The write boundary of §8, declared because Python will not enforce it.
+#
+# The agent writes two things to storage — the session log and the interview
+# summary — and it must not be able to write either against any patient except
+# the one it is talking to. Everything runs in one process, so this cannot be a
+# network rule. It is a code boundary.
+#
+# `services.core` constructs a `SessionWriter` per session with the patient id
+# closed over and hands it to the pipeline; the bot holds it for the length of
+# the call and has no way to name a different patient.
+#
+# The TypeScript version of this was enforced for free — `services/agent`
+# simply would not have listed the store in its `package.json`. Python has no
+# equivalent, so the boundary is declared here and checked in CI. We noticed
+# the language would not enforce it and did not assume it away.
+#
+# What production would add, and we will not build at this stage: a separate
+# Postgres role plus row-level security, so the constraint lives in the
+# database rather than only in our code. Knowing the difference is the point.
+
+[importlinter]
+root_packages =
+    services
+    shared
+
+[importlinter:contract:agent-cannot-reach-the-store]
+name = agent must not import the store
+type = forbidden
+source_modules =
+    services.agent
+forbidden_modules =
+    services.core.store
+    services.core.queue
+
+[importlinter:contract:agent-is-independent-of-core]
+name = the agent must not reach back into core at all
+type = forbidden
+source_modules =
+    services.agent
+forbidden_modules =
+    services.core
+
+[importlinter:contract:contracts-depend-on-nothing]
+name = shared.contracts is a leaf
+type = forbidden
+source_modules =
+    shared.contracts
+forbidden_modules =
+    services
