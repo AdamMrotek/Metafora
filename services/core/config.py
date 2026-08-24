@@ -54,6 +54,15 @@ LIVEKIT_API_KEY = os.environ.get("LIVEKIT_API_KEY", "devkey")
 LIVEKIT_API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "secret")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
+#: Supabase Postgres. Empty in dev means the JSONL writer stays the record and
+#: the store stays in-process — `make dev` still runs on a laptop with nothing
+#: provisioned. Outside dev it is required, because a deployed system that
+#: forgets everything on restart is the failure Phase 1 exists to remove.
+#:
+#: Use the *session* pooler (port 5432), not the transaction pooler (6543):
+#: asyncpg prepares statements, and transaction mode breaks them.
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
 #: The frontend stops sharing an origin once it deploys separately, so its
 #: origin has to be named rather than implied by a Vite proxy.
 ALLOWED_ORIGINS = [
@@ -105,6 +114,11 @@ def _problems() -> list[str]:
         found.append(
             "LIVEKIT_API_KEY/LIVEKIT_API_SECRET are still the published "
             "`livekit-server --dev` credentials — anyone can mint a valid token"
+        )
+    if not DATABASE_URL:
+        found.append(
+            "DATABASE_URL is empty — the deployment would write its only record "
+            "to a container filesystem that the next release deletes"
         )
     if LIVEKIT_PUBLIC_URL.startswith("ws://"):
         found.append(
