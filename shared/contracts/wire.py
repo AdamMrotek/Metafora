@@ -55,7 +55,11 @@ class EndedMessage(CamelModel):
     """The line closes on a sentence, not a submit."""
 
     t: Literal["ended"] = "ended"
-    reason: Literal["complete", "safety", "error"]
+    #: `interrupted` is a call this side cut short while healthy — a deploy,
+    #: the duration ceiling. Distinct from `error` because the patient did
+    #: nothing wrong and the right thing to offer them is a way back, and
+    #: distinct from `complete` because the interview did not finish.
+    reason: Literal["complete", "safety", "interrupted", "error"]
     say: str | None = None
 
 

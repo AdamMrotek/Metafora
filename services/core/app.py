@@ -416,9 +416,20 @@ async def _await_goodbye(session_id: str, task: asyncio.Task | None) -> None:
 
 
 def _wire_reason(reason: str) -> str:
+    """Why the call ended, in the vocabulary the portal renders.
+
+    A shutdown or the duration ceiling is not an error: nothing failed, this
+    side chose to stop. Phase 3's blue/green makes shutdown routine, so the
+    patient hearing it framed as a fault would be wrong most of the time it
+    happens.
+    """
     if reason == "safety":
         return "safety"
-    return "complete" if reason in {"complete", "ended_by_patient"} else "error"
+    if reason in {"complete", "ended_by_patient"}:
+        return "complete"
+    if reason in {"server_shutdown", "max_duration"}:
+        return "interrupted"
+    return "error"
 
 
 async def drain(reason: str) -> None:

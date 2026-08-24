@@ -42,7 +42,11 @@ export interface NotesMessage {
 /** The line closes on a sentence, not a submit. */
 export interface EndedMessage {
   t: 'ended';
-  reason: 'complete' | 'safety' | 'error';
+  /** `interrupted` is a call this side cut short while healthy — a deploy, */
+  /** the duration ceiling. Distinct from `error` because the patient did */
+  /** nothing wrong and the right thing to offer them is a way back, and */
+  /** distinct from `complete` because the interview did not finish. */
+  reason: 'complete' | 'safety' | 'interrupted' | 'error';
   say?: string;
 }
 
@@ -56,7 +60,7 @@ export type ServerMessage =
   | { t: 'utterance'; who: 'assistant' | 'patient'; text: string; id: string }
   | { t: 'phase'; phase: CallPhase }
   | { t: 'notes'; fields: FieldState[] }
-  | { t: 'ended'; reason: 'complete' | 'safety' | 'error'; say?: string };
+  | { t: 'ended'; reason: 'complete' | 'safety' | 'interrupted' | 'error'; say?: string };
 
 export type ClientMessage =
   | { t: 'typed'; text: string };

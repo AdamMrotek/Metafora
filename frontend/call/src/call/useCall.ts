@@ -10,14 +10,26 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMic } from './useMic.ts';
 
 /**
- * How long the line stays open after the assistant's last word.
+ * How long to keep playing after the assistant *leaves the room*.
  *
- * "ended" travels the data channel, which overtakes the audio still sitting in
- * the jitter buffer — hang up the moment it lands and the goodbye is clipped
- * mid-word. Nothing is sent or heard during the drain except the tail of a
- * sentence already on its way, so this costs the patient nothing.
+ * The bot drops its transport only once the pipeline has genuinely finished
+ * speaking (`services/core/app.py`, the `finally` in `run_session`), so its
+ * departure — not "ended" — is the signal that the audio is complete. What is
+ * left at that moment is the tail sitting in our own jitter buffer, which is
+ * milliseconds, not sentences.
  */
-const DRAIN_MS = 2500;
+const JITTER_DRAIN_MS = 750;
+
+/**
+ * Backstop for an assistant that never leaves: a hard-killed server, a dropped
+ * network. Must stay above `GOODBYE_TIMEOUT_S` in `services/core/app.py`, which
+ * is how long that side will wait for the pipeline to stop speaking — if this
+ * fires first we clip exactly the goodbye it was holding the line for.
+ */
+const MAX_DRAIN_MS = 12_000;
+
+/** What `mint_token(..., "assistant", ...)` in `services/core/app.py` names it. */
+const ASSISTANT_IDENTITY = 'assistant';
 
 export interface Bubble {
   id: string;
@@ -47,6 +59,7 @@ export function useCall() {
   const mic = useMic();
   const roomRef = useRef<Room | null>(null);
   const drainRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backstopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [state, setState] = useState<CallState>({
     phase: 'idle',
     bubbles: [],
@@ -64,9 +77,11 @@ export function useCall() {
    * Disconnected event this raises does not come back round for a second go.
    */
   const hangUp = useCallback(() => {
-    if (drainRef.current !== null) {
-      clearTimeout(drainRef.current);
-      drainRef.current = null;
+    for (const ref of [drainRef, backstopRef]) {
+      if (ref.current !== null) {
+        clearTimeout(ref.current);
+        ref.current = null;
+      }
     }
     mic.release();
     const room = roomRef.current;
@@ -80,10 +95,15 @@ export function useCall() {
   const apply = useCallback(
     (message: ServerMessage) => {
       if (message.t === 'ended') {
-        // Nothing the patient says now is wanted, so the mic goes at once —
-        // but the assistant may still be a word or two from being heard.
+        // Nothing the patient says now is wanted, so the mic goes at once.
+        //
+        // The line itself stays open. "ended" is sent *before* the assistant
+        // stops speaking — on a server shutdown, mid-sentence with a whole
+        // utterance still to play — so hanging up on a timer started here
+        // clips whatever is left. We wait for the assistant to leave instead,
+        // and only arm a backstop in case it never does.
         mic.release();
-        drainRef.current ??= setTimeout(hangUp, DRAIN_MS);
+        backstopRef.current ??= setTimeout(hangUp, MAX_DRAIN_MS);
       }
 
       setState((prev) => {
@@ -138,6 +158,15 @@ export function useCall() {
       });
       room.on(RoomEvent.TrackUnsubscribed, (track) => {
         track.detach().forEach((el) => el.remove());
+      });
+      // The assistant leaving is the only trustworthy "the audio is finished"
+      // signal we get: the bot holds its transport open until the pipeline has
+      // stopped speaking. Whatever is left after that is jitter buffer, so we
+      // drain that and close — no assistant means no call, whether or not
+      // "ended" ever arrived.
+      room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+        if (participant.identity !== ASSISTANT_IDENTITY) return;
+        drainRef.current ??= setTimeout(hangUp, JITTER_DRAIN_MS);
       });
       // However the line drops — the bot leaving, the network, our own
       // hangup — the microphone goes with it.

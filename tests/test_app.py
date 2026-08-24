@@ -17,7 +17,7 @@ import pytest
 
 from services.core import app as app_module
 from services.core import store
-from services.core.app import BUSY_MESSAGE, TYPED_USER_ID, app, drain
+from services.core.app import BUSY_MESSAGE, TYPED_USER_ID, _wire_reason, app, drain
 from services.core.limits import RateLimiter
 from tests import fakes
 
@@ -191,6 +191,25 @@ async def test_drain_ends_every_live_call(bots):
     assert store.live_sessions() == []
     assert all(bot.wire.kinds.count("ended") == 1 for bot in bots.bots)
     assert all(bot.worker.stopped for bot in bots.bots)
+
+
+@pytest.mark.parametrize(
+    ("internal", "wire"),
+    [
+        ("complete", "complete"),
+        ("ended_by_patient", "complete"),
+        ("safety", "safety"),
+        ("server_shutdown", "interrupted"),
+        ("max_duration", "interrupted"),
+        ("pipeline_finished", "error"),
+    ],
+)
+def test_a_healthy_shutdown_is_not_reported_to_the_patient_as_an_error(internal, wire):
+    """Phase 3's blue/green makes `server_shutdown` a routine event. Calling it
+    an error would mean the portal telling most patients something went wrong
+    when the only thing that happened is that we deployed.
+    """
+    assert _wire_reason(internal) == wire
 
 
 async def test_teardown_waits_for_the_goodbye_instead_of_cutting_it_off(bots):
