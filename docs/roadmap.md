@@ -107,13 +107,29 @@ uncommitted. Commit them before touching anything else.
 - Per-IP rate limit on `POST /session`. One process, so a small in-process token bucket is
   honest; `slowapi` if you would rather not hand-roll it.
 
-**Verify blocker 5.** `drain()` (`app.py:301`) claims `stop_when_done()` lets the pipeline finish
-speaking, but it awaits that and then cancels the runner. Prove it with a real SIGTERM during a
-live call, before Phase 3's blue/green depends on it. If it does not hold, await the pipeline's
-actual end — an `EndFrame` reaching the transport — with a timeout.
+**Blocker 5 — settled, and it was not where this said it was.** `drain()` was accused of awaiting
+`stop_when_done()` and then cancelling the runner. It no longer does: `_await_goodbye`
+(`app.py:380`) shields the runner task and waits for it to *end*, which is the EndFrame actually
+reaching the transport, with `GOODBYE_TIMEOUT_S` as the ceiling.
 
-**Done when** `make check` is green in CI, a SIGTERM mid-call produces a goodbye, and a fourth
-concurrent caller gets a polite 503.
+A real SIGTERM mid-call confirmed the backend side — `logs/s_92c852d7.jsonl` has `session.ended` at
+16:26:18.493 and `tts.spoken` (emitted on `BotStoppedSpeakingFrame`) at 16:26:26.670, so the
+pipeline pushed all 8.2 remaining seconds of the sentence. The patient still heard it cut off after
+about two, because the *portal* hung up on a 2.5s timer (`DRAIN_MS`) started when `ended` arrived —
+and `ended` is sent at the top of teardown, before the goodbye has been spoken.
+
+The lesson is worth keeping: the goodbye is a property of the whole path, and the server holding
+the line open means nothing if the client will not listen. `useCall.ts` now waits for the assistant
+to *leave the room* — which the bot does only once its pipeline has stopped speaking — drains the
+jitter buffer, and treats a timer purely as a backstop, held above `GOODBYE_TIMEOUT_S` by a comment
+in both files.
+
+Also fixed in passing: `_wire_reason` reported a shutdown to the browser as `"error"`. Phase 3
+makes shutdown routine, so the wire gained `"interrupted"` — nothing failed, this side chose to
+stop, and the patient should be offered a way back rather than a fault.
+
+**Done when** `make check` is green in CI, a SIGTERM mid-call produces a goodbye *that the patient
+hears to the end*, and a fourth concurrent caller gets a polite 503.
 
 ---
 
@@ -280,7 +296,7 @@ Independent of each other; reorder freely once the MVP is out.
 
 | Phase | Check |
 |---|---|
-| **0** | `make check` green in CI, with `test_app.py` passing with no LiveKit and no API key. Manually: `make dev`, start a call, `kill -TERM` the api process, confirm the patient hears a goodbye. Open a fourth concurrent session and confirm the 503. |
+| **0** | `make check` green in CI, with `test_app.py` passing with no LiveKit and no API key. Manually: run `make sfu`, `make api` and `make web` in separate terminals — *not* `make dev`, whose ctrl-c takes the SFU down with the API and so proves nothing — start a call, and while the assistant is mid-sentence run `kill -TERM $(lsof -ti tcp:3000)`. Confirm the sentence finishes in your ear before the room drops. Open a fourth concurrent session and confirm the 503. |
 | **1** | Complete a call, restart the process, query `clinical.interviews` and `transcript.events` for it. Keep both writers on for one call and diff the Postgres rows against the JSONL the same call wrote — same events, same order. |
 | **2** | `curl` every read route anonymously (401), with a wrong-role JWT (403, *with a reason in the body*, not a 404), and with a valid clinician JWT (the row). `make check` covers the same three. |
 | **3** | Open the deployed URL on a phone that is not on your network and complete an interview. Confirm the row survives a redeploy. Force an error on a staging machine and confirm it reaches Sentry. Deploy twice during a live call: it survives the first and drains with a goodbye on the second. |
