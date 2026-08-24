@@ -4,28 +4,38 @@ This is one of the two suites whose logic is the product rather than the
 plumbing, so it ports rather than retires with the implementation.
 """
 
-from services.agent.config.protocol import WARMUP_V1
+import pytest
+
+from services.agent.config.protocol import PROTOCOLS, WARMUP_V1
 from services.agent.safety import ScanResult, scan
 
+#: Every published protocol, not just the one the queue dispatches. A catalog
+#: is only proven if every entry in it is.
+published = pytest.mark.parametrize(
+    "protocol", list(PROTOCOLS.values()), ids=lambda p: p.id
+)
 
-def test_every_red_flag_fires_on_its_own_proving_utterance():
+
+@published
+def test_every_red_flag_fires_on_its_own_proving_utterance(protocol):
     """The studio spec requires one fixture per catalog entry, generated from the
     utterance that proves the flag fires. This test derives itself from the
     protocol, so a flag added without a proving utterance fails here rather than
     shipping unproven.
     """
-    assert WARMUP_V1.red_flags, "the catalog must not be empty"
+    assert protocol.red_flags, "the catalog must not be empty"
 
-    for flag in WARMUP_V1.red_flags:
+    for flag in protocol.red_flags:
         assert flag.proving_utterance, f"{flag.id} has no proving utterance"
-        result = scan(flag.proving_utterance, WARMUP_V1)
+        result = scan(flag.proving_utterance, protocol)
         assert any(h.flag.id == flag.id for h in result.hits), (
             f'{flag.id} did not fire on: "{flag.proving_utterance}"'
         )
 
 
-def test_every_end_call_flag_carries_the_sentence_spoken_in_its_place():
-    for flag in (f for f in WARMUP_V1.red_flags if f.action == "end_call"):
+@published
+def test_every_end_call_flag_carries_the_sentence_spoken_in_its_place(protocol):
+    for flag in (f for f in protocol.red_flags if f.action == "end_call"):
         assert flag.say, f"{flag.id} ends the call but says nothing"
 
 
