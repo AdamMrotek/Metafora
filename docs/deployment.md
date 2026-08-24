@@ -152,8 +152,23 @@ docs and then reads the code should not find drift.
 
 ## 7 · Order
 
-1. **Ship the thin version.** Fly + LiveKit Cloud + Pages, plus blockers 1, 2, 3 (and 5
-   verified). A working clickable link beats an unfinished better architecture.
-2. **Then Postgres.** Sessions and transcripts persisted, `store.py` backed by it, a read-only
-   clinician view over real data.
-3. **Then the post-call queue**, if still wanted — now pointed at work that genuinely needs it.
+**Superseded by [`roadmap.md`](./roadmap.md), which phases the whole project.** This section
+originally said *ship the thin version first* — deploy on ephemeral state, add Postgres after.
+That was reversed on 2026-08-24: **persistence and auth land before the first deploy**, so one
+deploy carries something durable rather than two carrying something that evaporates.
+
+Two things on this page change as a result:
+
+- **Blocker 4 stops needing a volume.** Postgres replaces the JSONL-on-ephemeral-disk problem
+  before there is a container to lose it on.
+- **Blocker 6 stops being acceptable at deploy time.** A public link that makes everyone Alice
+  was fine while the record evaporated; once the rows persist it fills `clinical.interviews`
+  with hundreds of identical patients. The demo link mints an ephemeral synthetic patient
+  instead.
+
+Everything else here still stands: the constraint in §1, the trade in §2, the stack in §3,
+blockers 1, 2, 3 and 5, the blue/green mechanic in §5, and the Supabase verdict in §6. The
+roadmap points at them rather than restating them.
+
+The order itself is now: **blockers → Postgres → auth → deploy → dashboard → sign-off**, with
+the post-call queue after the MVP, pointed at work that genuinely needs a queue.
