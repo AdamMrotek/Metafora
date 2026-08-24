@@ -28,6 +28,12 @@ package = false
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+# `make test` stays pure — no key, no SFU, no database. Postgres-backed tests
+# opt in via `make test-pg`, which supplies TEST_DATABASE_URL.
+addopts = "-m 'not postgres'"
+markers = [
+    "postgres: needs a Postgres at TEST_DATABASE_URL (deselected by default)",
+]
 
 [tool.ruff]
 line-length = 100

@@ -15,6 +15,21 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # Plain Postgres, not the Supabase stack: nothing Supabase-specific (auth,
+    # RLS, Realtime) is in the schema yet, and the migration is ordinary SQL.
+    # Matches the hosted project's major version so a 17-only construct cannot
+    # pass here and fail on push.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +39,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       - name: Install
@@ -36,6 +51,14 @@ jobs:
       # test that needed either would be caught here rather than in review.
       - name: Test
         run: make test
+
+      # The append-only triggers on config.protocols and transcript.events are
+      # the schema's whole promise, and a later migration can drop one without
+      # any test in the pure suite noticing.
+      - name: Schema
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: uv run pytest -m postgres
 
       - name: Lint
         run: make lint

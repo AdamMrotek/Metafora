@@ -93,10 +93,19 @@ doctor: ## Check the prerequisites are in place
 
 ## ---- checks ----------------------------------------------------------------
 
-check: test lint typecheck ## Everything CI would run
+check: test lint typecheck ## Everything CI runs except the schema tests (make test-pg — needs Docker)
 
 test: ## pytest — no API key, no LiveKit needed
 	uv run pytest
+
+test-pg: ## Schema tests against a throwaway Postgres in Docker
+	@docker inspect metafora-pg >/dev/null 2>&1 \
+		|| docker run -d --name metafora-pg -e POSTGRES_PASSWORD=postgres \
+			-p 55432:5432 postgres:17 >/dev/null
+	@docker start metafora-pg >/dev/null 2>&1 || true
+	@until docker exec metafora-pg pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:55432/postgres \
+		uv run pytest -m postgres
 
 lint: ## ruff
 	uv run ruff check .
