@@ -10,9 +10,8 @@
   ],
   "scripts": {
     "dev:call": "npm run dev --workspace=@metafora/call",
-    "dev:ui": "npm run dev --workspace=@metafora/ui",
     "build:call": "npm run build --workspace=@metafora/call",
-    "typecheck": "tsc -p shared/contracts && tsc -p frontend/shared && tsc -p frontend/call",
+    "typecheck": "tsc -p shared/contracts && tsc -p frontend/call",
     "livekit": "livekit-server --dev"
   },
   "engines": {

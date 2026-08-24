@@ -1,0 +1,50 @@
+# Everything `make check` runs, plus the one invariant only CI can hold:
+# `shared/contracts/src/*.ts` is generated, so a pydantic model edited without
+# `make contracts` is a drift no reviewer reliably catches.
+name: check
+
+on:
+  push:
+    branches: [main, 'refactor/**']
+  pull_request:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install
+        run: |
+          uv sync --frozen
+          npm ci
+
+      # No GROQ_API_KEY and no SFU: the suite is pure by construction, and a
+      # test that needed either would be caught here rather than in review.
+      - name: Test
+        run: make test
+
+      - name: Lint
+        run: make lint
+
+      - name: Typecheck
+        run: make typecheck
+
+      - name: Contracts are in sync with the models
+        run: |
+          make contracts
+          git diff --exit-code -- shared/contracts/src \
+            || { echo "::error::shared/contracts/src is stale — run 'make contracts' and commit the result"; exit 1; }

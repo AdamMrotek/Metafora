@@ -77,37 +77,47 @@ no CORS, and `ALLOWED_ORIGINS` stops mattering.
 
 ## 4 · What blocks a deploy today
 
-In the code now, not hypothetical.
+Six were found. **Four are now closed** (roadmap Phase 0, 2026-08-24); the two that remain are
+owned by later phases, so nothing on this list is loose.
 
-1. **Cost and abuse control — do this first.** `POST /session` is unauthenticated and starts an
-   LLM + TTS session on every hit. A shared link, a crawler, or one bored person is an unbounded
-   Groq bill. Needs a **concurrent-session cap** (returning a friendly "all lines busy"), a
-   **max call duration**, and basic **rate limiting**. The box only handles 2–4 concurrent calls
-   anyway, so the cap is honest rather than a missing feature.
+### Closed
 
-2. **`LIVEKIT_URL` is doing two incompatible jobs.** `app.py` dials it (`url=LIVEKIT_URL`) *and*
-   hands the same string to the browser in the `/session` response. In production the backend
-   may want an internal address while the browser needs the public `wss://` one. Split into two
-   vars.
+1. ~~**Cost and abuse control.**~~ `POST /session` now refuses before it creates anything:
+   `MAX_CONCURRENT_SESSIONS` (default 3) returns 503, a per-IP token bucket
+   (`services/core/limits.py`) returns 429 with `Retry-After`, and a `MAX_CALL_SECONDS` watchdog
+   hangs up a tab left open. Both refusals carry the same "all lines busy" sentence, and both
+   happen before a session record, a room or a log file exists.
 
-3. **`config.py` defaults to `devkey`/`secret`.** A misconfigured production box silently boots
-   with published dev credentials and mints valid tokens. Should hard-fail on startup outside
-   dev. Same for a missing `GROQ_API_KEY`: today it only logs a warning and then dies at the
-   first turn, mid-call, in front of a patient.
+2. ~~**`LIVEKIT_URL` doing two incompatible jobs.**~~ Split: `LIVEKIT_URL` is what this process
+   dials, `LIVEKIT_PUBLIC_URL` is what the browser is handed. Defaults to the former, so dev is
+   unchanged.
+
+3. ~~**`config.py` defaulting to `devkey`/`secret`.**~~ `METAFORA_ENV` gates it. Outside `dev`,
+   `services/core/config.py` refuses to import on the published SFU credentials, an empty
+   `GROQ_API_KEY`, or a `ws://` URL a browser on https would reject — at import, which is the
+   last moment the failure is a stack trace rather than a patient.
+
+5. ~~**Graceful drain looked truncated.**~~ **It was.** Verified against the installed pipecat:
+   `stop_when_done()` (`pipeline/worker.py:659`) queues an `EndFrame` and returns without
+   waiting, so cancelling the runner immediately after it did cut the goodbye off. `teardown()`
+   now waits for the runner task to end on its own, bounded by `GOODBYE_TIMEOUT_S`, then cancels
+   and waits for the cancellation to land. Held by
+   `tests/test_app.py::test_teardown_waits_for_the_goodbye_instead_of_cutting_it_off`.
+
+All four are covered by `tests/test_app.py`, which fakes the LiveKit bot
+(`tests/fakes.py`) so the HTTP surface is testable with no SFU, no Groq key and no network.
+
+### Still open, and owned
 
 4. **Session logs land on ephemeral disk.** `services/agent/session_log.py:198` writes
-   `logs/<sessionId>.jsonl` under the repo root. On any container platform that is gone at the
-   next deploy. Needs a volume, or §6.
+   `logs/<sessionId>.jsonl` under the repo root. **Owned by roadmap Phase 1** — Postgres lands
+   before the deploy, so this is solved rather than papered over with a volume. See §6.
 
-5. **Graceful drain looks truncated.** `teardown()` awaits `stop_when_done()` and then
-   immediately `task.cancel()`s the runner. `stop_when_done()` queues an `EndFrame` and returns
-   — it does not wait for the pipeline to finish speaking. So the "a patient gets a goodbye
-   instead of silence" guarantee in `drain()`'s docstring probably does not hold on SIGTERM.
-   **Verify before relying on it for deploys.**
-
-6. **`queue.py` is one hardcoded patient.** Everyone who opens the deployed URL becomes Alice
-   (in their own room — concurrent visitors do not collide, they are just all called Alice). Fine
-   for a demo; state it plainly rather than let a reader discover it.
+6. **`queue.py` is one hardcoded patient.** Everyone who opens the deployed URL becomes Alice —
+   in their own room, so concurrent visitors do not collide, they are just all called Alice.
+   **Owned by roadmap Phase 3**, and it stopped being cosmetic once the rows persist: the demo
+   link mints an ephemeral synthetic patient per visitor, and real per-patient dispatch arrives
+   in Phase 5.
 
 ---
 

@@ -13,8 +13,9 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
 from pipecat.pipeline.runner import WorkerRunner
 from pydantic import BaseModel
@@ -25,9 +26,15 @@ from services.agent.session_log import ErrorEvent, PatientJoined, RoomJoined
 from services.core.config import (
     ALLOWED_ORIGINS,
     GROQ_API_KEY,
+    LIVEKIT_PUBLIC_URL,
     LIVEKIT_URL,
+    MAX_CALL_SECONDS,
+    MAX_CONCURRENT_SESSIONS,
     PORT,
+    RATE_LIMIT_BURST,
+    RATE_LIMIT_WINDOW_S,
 )
+from services.core.limits import RateLimiter
 from services.core.queue import next_interview
 from services.core.store import Session, create_session, end_session, get_session, live_sessions
 from services.core.tokens import mint_token
@@ -40,14 +47,34 @@ PATIENT_TIMEOUT_S = 30.0
 #: the record can say which it was. Everything else about the turn is identical.
 TYPED_USER_ID = "patient-typed"
 
+#: Said to the patient who arrives when the box is full. Deliberately not an
+#: apology for a fault: the box holds a small number of concurrent calls by
+#: construction, so this is the system working.
+BUSY_MESSAGE = "All lines are busy at the moment. Please try again in a few minutes."
+
+#: How long the goodbye may take before we stop waiting for it.
+#:
+#: `stop_when_done()` only *queues* an EndFrame and returns (pipecat
+#: `pipeline/worker.py:659`) — it does not wait for the pipeline to finish
+#: speaking. Cancelling the runner straight after it therefore cuts the sentence
+#: off, which is exactly what `drain()` promises not to do. So teardown waits
+#: for the runner task to end on its own, and this is the bound on that wait: a
+#: pipeline wedged on a hung TTS call must not hold a deploy open forever.
+GOODBYE_TIMEOUT_S = 10.0
+
 _tasks: dict[str, asyncio.Task] = {}
+_watchdogs: dict[str, asyncio.Task] = {}
+_starts = RateLimiter(burst=RATE_LIMIT_BURST, window_s=RATE_LIMIT_WINDOW_S)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not GROQ_API_KEY:
         logger.warning("GROQ_API_KEY is not set — calls will fail at the first turn")
-    logger.info(f"metafora · livekit {LIVEKIT_URL} · origins {ALLOWED_ORIGINS}")
+    logger.info(
+        f"metafora · livekit {LIVEKIT_URL} (browsers dial {LIVEKIT_PUBLIC_URL}) "
+        f"· origins {ALLOWED_ORIGINS} · cap {MAX_CONCURRENT_SESSIONS} calls"
+    )
     yield
     await drain("server_shutdown")
 
@@ -65,9 +92,27 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(HTTPException)
+async def _error_body(_request: Request, exc: HTTPException) -> JSONResponse:
+    """`useCall.ts` reads `.error` off a failed response; FastAPI's default body
+    says `.detail`, so every failure reached the patient as the generic "could
+    not start". One handler, and the message we wrote is the message they see.
+    """
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail},
+        headers=getattr(exc, "headers", None),
+    )
+
+
 @app.get("/health")
 async def health():
-    return {"ok": True, "live": len(live_sessions()), "livekit": LIVEKIT_URL}
+    return {
+        "ok": True,
+        "live": len(live_sessions()),
+        "capacity": MAX_CONCURRENT_SESSIONS,
+        "livekit": LIVEKIT_URL,
+    }
 
 
 class TypedBody(BaseModel):
@@ -75,7 +120,7 @@ class TypedBody(BaseModel):
 
 
 @app.post("/session")
-async def start_session():
+async def start_session(request: Request):
     """Start an interview. Four things, and the order is the point:
 
     1. create the session record and a room name
@@ -86,7 +131,26 @@ async def start_session():
     The browser connects and finds the assistant already there. Because we join
     before we hand out the token there is no race and no window in which a
     patient sits alone in an empty room.
+
+    Both refusals below happen *before* step 1, so a turned-away caller leaves
+    no session record, no room and no log file behind.
     """
+    caller = request.client.host if request.client else "unknown"
+    if not _starts.allow(caller):
+        raise HTTPException(
+            429,
+            BUSY_MESSAGE,
+            headers={"Retry-After": str(_starts.retry_after(caller))},
+        )
+
+    # Silero and SmartTurn run in-process on every 32 ms frame of every call, so
+    # capacity is a physical property of the box. Refusing the next caller keeps
+    # the calls already in progress intelligible; accepting them degrades all of
+    # them at once.
+    if len(live_sessions()) >= MAX_CONCURRENT_SESSIONS:
+        logger.warning(f"[session] refused {caller}: at capacity")
+        raise HTTPException(503, BUSY_MESSAGE, headers={"Retry-After": "60"})
+
     interview = next_interview()
     protocol = PROTOCOLS.get(interview.protocol_id)
     if protocol is None:
@@ -130,6 +194,7 @@ async def start_session():
             connected.set()
 
         _tasks[session.id] = asyncio.create_task(_run(session, bot))
+        _watchdogs[session.id] = asyncio.create_task(_expire(session.id))
         await asyncio.wait_for(connected.wait(), timeout=PATIENT_TIMEOUT_S)
         session.writer.append(RoomJoined(identity="assistant"))
 
@@ -143,10 +208,11 @@ async def start_session():
         await teardown(session.id, "start_failed")
         raise HTTPException(500, str(exc)) from exc
 
-    # 4 ─ hand it over
+    # 4 ─ hand it over. The *public* URL: this process may have dialled the SFU
+    # on an address the patient's browser cannot resolve.
     return {
         "token": token,
-        "url": LIVEKIT_URL,
+        "url": LIVEKIT_PUBLIC_URL,
         "session": SessionBootstrap(
             session_id=session.id,
             room_name=session.room_name,
@@ -272,6 +338,23 @@ async def end(session_id: str):
     return {"ok": True}
 
 
+async def _expire(session_id: str) -> None:
+    """Hang up a call that has run past `MAX_CALL_SECONDS`.
+
+    An interview is minutes. Anything near the ceiling is a tab someone left
+    open, and it is holding one of very few concurrency slots — so this is a
+    capacity guard as much as a cost one. Ending through `teardown` means an
+    expired call gets the same goodbye and the same record as any other.
+    """
+    try:
+        await asyncio.sleep(MAX_CALL_SECONDS)
+    except asyncio.CancelledError:
+        return
+    if get_session(session_id) is not None:
+        logger.warning(f"[session] {session_id} hit the {MAX_CALL_SECONDS}s ceiling")
+        await teardown(session_id, "max_duration")
+
+
 async def teardown(session_id: str, reason: str) -> None:
     """Idempotent: returns silently for a session that is already gone."""
     session = get_session(session_id)
@@ -287,9 +370,49 @@ async def teardown(session_id: str, reason: str) -> None:
         except Exception as exc:
             logger.warning(f"[session] teardown: {exc}")
 
-    task = _tasks.pop(session_id, None)
-    if task and not task.done():
+    watchdog = _watchdogs.pop(session_id, None)
+    if watchdog and not watchdog.done():
+        watchdog.cancel()
+
+    await _await_goodbye(session_id, _tasks.pop(session_id, None))
+
+
+async def _await_goodbye(session_id: str, task: asyncio.Task | None) -> None:
+    """Let the pipeline finish the sentence it is on, then cancel it.
+
+    The EndFrame queued by `stop_when_done()` still has to travel the length of
+    the pipeline and out through the transport. The runner task ending is the
+    only signal that it arrived, so that is what we wait on.
+    """
+    if task is None or task.done():
+        return
+
+    if task is asyncio.current_task():
+        # We were reached from inside the pipeline's own task — a transport
+        # event handler, typically the patient hanging up. Waiting here would be
+        # waiting on ourselves. The EndFrame is queued; the task ends itself.
+        return
+
+    try:
+        # Shielded, so a timeout leaves the task alive for us to cancel
+        # deliberately rather than having `wait_for` cancel it mid-sentence.
+        await asyncio.wait_for(asyncio.shield(task), timeout=GOODBYE_TIMEOUT_S)
+    except TimeoutError:
+        logger.warning(
+            f"[session] {session_id} did not finish speaking within "
+            f"{GOODBYE_TIMEOUT_S}s — cancelling"
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(f"[session] {session_id} pipeline ended badly: {exc}")
+
+    if not task.done():
         task.cancel()
+        # `cancel()` only *requests* it. On shutdown we are about to stop the
+        # loop, so wait for the cancellation to actually land rather than
+        # leaving a half-unwound pipeline behind.
+        await asyncio.gather(task, return_exceptions=True)
 
 
 def _wire_reason(reason: str) -> str:

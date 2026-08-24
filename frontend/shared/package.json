@@ -4,14 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./tokens.css": "./tokens.css",
-    "./ui.css": "./src/ui.css"
-  },
-  "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
-    "dev": "vite --config vite.config.ts",
-    "build": "vite build --config vite.config.ts"
+    "./tokens.css": "./tokens.css"
   },
   "peerDependencies": {
     "react": "^19.0.0"
