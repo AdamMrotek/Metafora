@@ -20,7 +20,8 @@ Always `uv run <cmd>`, never bare `python`/`pytest`.
 ## Map
 
 **`services/core/`** — HTTP + state. `app.py` (4 routes, `POST /session` is the entry point) ·
-`store.py` in-process session records · `tokens.py` LiveKit tokens · `config.py` env · `queue.py` dispatch.
+`store.py` live session handles here, the durable record in Postgres · `db.py` the only pool ·
+`tokens.py` LiveKit tokens · `config.py` env · `queue.py` dispatch (`resolve_interview`).
 
 **`services/agent/`** — the conversation.
 - `pipeline.py` — assembles the Pipecat pipeline. **Start here** for anything about call flow.
@@ -33,6 +34,10 @@ Always `uv run <cmd>`, never bare `python`/`pytest`.
 
 **`shared/contracts/`** — `models.py` + `wire.py` are the source of truth; `src/*.ts` is **generated**.
 
+**`supabase/migrations/`** — the schema, applied. Four schemas (`clinical`, `transcript`,
+`config`, `metrics`); `config.protocols` and `transcript.events` are append-only by trigger.
+`make test-pg` runs them against a throwaway Postgres.
+
 **`frontend/call/src/`** — patient portal. `App.tsx`, `call/useCall.ts` is the LiveKit hook.
 
 **`tests/`** — mirrors module names (`test_gate.py`, `test_machine.py`, …). `tests/e2e/patient.py`
@@ -41,8 +46,7 @@ needs a live backend and a real key; it is not part of `make test`.
 **`docs/`** — the only place prose lives. `system-map.md` = *intended* architecture,
 `agent-review-and-pipecat-decision.md` = why Pipecat/Python. Read only for architectural tasks.
 
-**Does not exist yet** (don't go looking): no database — sessions are in-memory (`core/store.py`)
-plus JSONL on disk, and `db/` is empty placeholders. The dashboard and studio apps in
+**Does not exist yet** (don't go looking): the dashboard and studio apps in
 `system-map.md` are unbuilt; `docs/ux/*.html` are frozen specs, not running code.
 `frontend/shared/` is a stub (`tokens.css` only). Audio recording/retention is unbuilt —
 `store-media` in `system-map.md` is its intended home; clinical-research regulation may require it.
@@ -60,5 +64,7 @@ plus JSONL on disk, and `db/` is empty placeholders. The dashboard and studio ap
 ## Conventions
 
 Conventional commits (`feat:`, `refactor:`, `docs:`). ruff only — no mypy, no black; `make typecheck`
-is TypeScript only, Python is unchecked. Groq is the only egress; `GROQ_API_KEY` is the one required
-env var (`.env.example` has the rest, all dev defaults). Current branch: `refactor/python-rewrite`.
+is TypeScript only, Python is unchecked. Two egresses, both named: Groq for STT/LLM/TTS and
+Supabase Postgres for the record. `GROQ_API_KEY` is the one env var `make dev` requires;
+`DATABASE_URL` is optional in dev (empty = JSONL on disk and an in-process store) and required
+outside it. `.env.example` has the rest, all dev defaults. Current branch: `refactor/python-rewrite`.

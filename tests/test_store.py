@@ -1,29 +1,32 @@
-"""Session records.
+"""Session records, with no database configured.
 
-In-memory today, Postgres-backed later. These tests are written against the
-*contract* — what a session is, when the log gets written, what "ended" means —
-rather than the dict, so they still hold when the record moves to a database.
+That is a real configuration, not a stand-in: `make dev` on a laptop with
+nothing provisioned takes exactly this path, and the writer it gets is the JSONL
+one. These tests are written against the *contract* — what a session is, when
+the log gets written, what "ended" means — which is why they survived the record
+moving to Postgres unchanged apart from the `await`. The Postgres half is
+`tests/test_persistence.py`.
 """
 
 import json
 
 from services.agent.config.protocol import PROTOCOLS
-from services.core.queue import next_interview
+from services.core.queue import synthetic_interview
 from services.core.store import create_session, end_session, get_session, live_sessions
 
 
-def _new():
-    interview = next_interview()
-    return create_session(interview, PROTOCOLS[interview.protocol_id])
+async def _new():
+    interview = synthetic_interview()
+    return await create_session(interview, PROTOCOLS[interview.protocol_id])
 
 
 def _log(session) -> list[dict]:
     return [json.loads(line) for line in session.writer.path.read_text().splitlines()]
 
 
-def test_creating_a_session_writes_the_opening_record():
-    session = create_session(
-        interview := next_interview(), PROTOCOLS[next_interview().protocol_id]
+async def test_creating_a_session_writes_the_opening_record():
+    session = await create_session(
+        interview := synthetic_interview(), PROTOCOLS[synthetic_interview().protocol_id]
     )
 
     created = _log(session)[0]
@@ -33,8 +36,8 @@ def test_creating_a_session_writes_the_opening_record():
     assert created["roomName"] == session.room_name
 
 
-def test_each_session_gets_its_own_id_and_room():
-    a, b = _new(), _new()
+async def test_each_session_gets_its_own_id_and_room():
+    a, b = await _new(), await _new()
     assert a.id != b.id
     assert a.room_name != b.room_name
     # The room name carries the session id, which is what makes a stray room in
@@ -42,17 +45,17 @@ def test_each_session_gets_its_own_id_and_room():
     assert a.id in a.room_name
 
 
-def test_a_new_session_is_live_and_unended():
-    session = _new()
+async def test_a_new_session_is_live_and_unended():
+    session = await _new()
     assert session.ended is False
     assert session.ended_reason is None
     assert session in live_sessions()
     assert get_session(session.id) is session
 
 
-def test_ending_records_the_reason_and_what_was_captured():
-    session = _new()
-    end_session(session, "ended_by_patient")
+async def test_ending_records_the_reason_and_what_was_captured():
+    session = await _new()
+    await end_session(session, "ended_by_patient")
 
     ended = _log(session)[-1]
     assert ended["type"] == "session.ended"
@@ -62,15 +65,15 @@ def test_ending_records_the_reason_and_what_was_captured():
     assert session not in live_sessions()
 
 
-def test_a_call_ends_once_however_many_things_notice():
+async def test_a_call_ends_once_however_many_things_notice():
     """The patient, the pipeline, the watchdog and a drain all race to end it."""
-    session = _new()
-    end_session(session, "patient_left")
-    end_session(session, "server_shutdown")
+    session = await _new()
+    await end_session(session, "patient_left")
+    await end_session(session, "server_shutdown")
 
     assert session.ended_reason == "patient_left"
     assert [e["type"] for e in _log(session)].count("session.ended") == 1
 
 
-def test_an_unknown_session_is_none_not_an_error():
+async def test_an_unknown_session_is_none_not_an_error():
     assert get_session("s_nope") is None

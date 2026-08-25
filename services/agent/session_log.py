@@ -4,15 +4,19 @@ Because every transcript and every reply passes through this process, the log
 is written *from the source* rather than reconstructed from whatever the
 browser chose to relay. That is the audit trail: both sides of the
 conversation, every state transition, every red-flag decision, and the latency
-of every turn. Append-only JSONL keeps it greppable and defers the database
-decision. The interface is the point — swapping in SQLite or Postgres later is
-one new implementation, not a migration of the pipeline.
+of every turn.
+
+The interface was the point, and it paid: Phase 1 added Postgres as one new
+implementation of `SessionWriter` and changed nothing in the pipeline. Which
+one a call gets is decided by `services.core.store` from whether a database is
+configured — Postgres when there is one, JSONL when there is not, never both.
 
 This log holds transcripts and state transitions. Audio capture is a separate
 concern and is not wired up here; if clinical-research requirements call for
 retained recordings, they belong in their own store, not in this file.
 """
 
+import asyncio
 import json
 import sys
 from datetime import UTC, datetime
@@ -179,6 +183,20 @@ class SessionWriter(Protocol):
 
     def append(self, event: LogEvent) -> None: ...
 
+    async def flush(self) -> None:
+        """Block until everything appended so far is durable.
+
+        Free for a writer that was never buffering; the point of the method is
+        that `services.core` does not have to know which kind it holds.
+        """
+
+        ...
+
+    async def close(self) -> None:
+        """Release whatever the writer was holding. Idempotent."""
+
+        ...
+
     def note_end_reason(self, reason: str) -> None:
         """Declare how this call is ending, from inside the pipeline.
 
@@ -216,6 +234,12 @@ class JsonlSessionWriter:
         """
         self.ending_reason = reason
 
+    async def flush(self) -> None:
+        """Nothing to do: `append` closed the file before it returned."""
+
+    async def close(self) -> None:
+        """Nothing to hold open: the file is opened and closed per line."""
+
     def append(self, event: LogEvent) -> None:
         line = {
             "at": datetime.now(UTC).isoformat(),
@@ -228,6 +252,115 @@ class JsonlSessionWriter:
         except OSError as exc:
             # A failed write must never take down a live call, but it must be loud.
             print(f"[session-log] write failed for {self._session_id}: {exc}", file=sys.stderr)
+class PostgresSessionWriter:
+    """Append-only rows in `transcript.events`, one per line the JSONL would write.
+
+    `append` is called from the pipeline's own task on every turn — six sites in
+    `observer.py` alone — so it must not touch the network. A round trip to a
+    hosted Postgres on each event would land in the same 32 ms budget Silero and
+    SmartTurn are already spending, and the patient would hear it. So `append`
+    only stamps a sequence number and hands the event to a queue; a background
+    task writes batches.
+
+    The cost of that is the last few events being in flight when a call ends,
+    which is what `flush` and `close` are for: the store flushes when it writes
+    `SessionEnded`, and `app.py` closes once the goodbye has actually been said.
+    """
+
+    #: A wedged pool must not hold a shutdown open. Long enough that an ordinary
+    #: round trip always wins, short enough that a drain still completes.
+    FLUSH_TIMEOUT_S = 5.0
+
+    _INSERT = (
+        "insert into transcript.events "
+        "(interview_id, session_id, seq, type, at, payload) "
+        "values ($1, $2, $3, $4, $5, $6) "
+        # A retried batch is harmless. `do nothing` also never fires
+        # `events_immutable`, which refuses UPDATE outright.
+        "on conflict (session_id, seq) do nothing"
+    )
+
+    def __init__(self, session_id: str, interview_id: str, pool) -> None:
+        self._session_id = session_id
+        self._interview_id = interview_id
+        self._pool = pool
+        self._seq = 0
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._task = asyncio.create_task(self._drain())
+        self._closed = False
+        #: How the bot says the call ended, when the bot ended it. Read back by
+        #: `services.core`; see `JsonlSessionWriter.note_end_reason`.
+        self.ending_reason: str | None = None
+
+    def note_end_reason(self, reason: str) -> None:
+        self.ending_reason = reason
+
+    def append(self, event: LogEvent) -> None:
+        if self._closed:
+            # Nothing would drain it. Losing a line of the record is worth a
+            # complaint even though it must not be worth an exception.
+            print(
+                f"[session-log] {event.type} appended after close for {self._session_id}",
+                file=sys.stderr,
+            )
+            return
+        self._seq += 1
+        self._queue.put_nowait(
+            (
+                self._interview_id,
+                self._session_id,
+                self._seq,
+                event.type,
+                datetime.now(UTC),
+                # Exactly the JSONL line minus `at` and `sessionId`, which are
+                # columns here. `type` stays in the payload as well as being
+                # lifted out, so a row and a log line say the same thing.
+                event.model_dump(by_alias=True, exclude_none=True),
+            )
+        )
+
+    async def flush(self) -> None:
+        """Wait until everything appended so far is on disk in Postgres."""
+        if self._task.done():
+            return
+        try:
+            await asyncio.wait_for(self._queue.join(), timeout=self.FLUSH_TIMEOUT_S)
+        except TimeoutError:
+            print(
+                f"[session-log] flush timed out for {self._session_id} — "
+                f"{self._queue.qsize()} event(s) unwritten",
+                file=sys.stderr,
+            )
+
+    async def close(self) -> None:
+        """Idempotent: called from both paths a call can end on."""
+        if self._closed:
+            return
+        self._closed = True
+        await self.flush()
+        self._task.cancel()
+        await asyncio.gather(self._task, return_exceptions=True)
+
+    async def _drain(self) -> None:
+        while True:
+            batch = [await self._queue.get()]
+            while True:
+                try:
+                    batch.append(self._queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            try:
+                await self._pool.executemany(self._INSERT, batch)
+            except Exception as exc:
+                # Same rule as the JSONL writer: a failed write must never take
+                # down a live call, but it must be loud.
+                print(
+                    f"[session-log] write failed for {self._session_id}: {exc}",
+                    file=sys.stderr,
+                )
+            finally:
+                for _ in batch:
+                    self._queue.task_done()
 
 
 def summarise(event: LogEvent) -> str:

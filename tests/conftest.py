@@ -1,11 +1,18 @@
 """Shared fixtures.
 
-Three jobs. Keep session logs out of the repo's own `logs/` directory — a test
-that creates a session would otherwise leave a real JSONL file behind — and
-reset the module-level state that `services/core` deliberately holds in-process,
-so tests cannot leak sessions, tasks or spent rate-limit tokens into each other.
-And supply the Postgres-backed tests a database, without costing the pure suite
-its "no key, no LiveKit, no database" property: `db` skips unless
+Four jobs. Keep session logs out of the repo's own `logs/` directory — a test
+that creates a session would otherwise leave a real JSONL file behind — reset
+the module-level state that `services/core` deliberately holds in-process, so
+tests cannot leak sessions, tasks or spent rate-limit tokens into each other,
+and hold the pure suite's "no key, no LiveKit, no database" property against a
+developer `.env` that names a real project.
+
+That last one is `no_database`, and it is not a formality. `config.py` reads
+`.env` at import and this repo's own `.env` has a populated `DATABASE_URL`, so
+without it a plain `make test` would open a pool against the hosted Supabase and
+write rows that the append-only triggers then refuse to let anyone delete.
+
+And supply the Postgres-backed tests a database: `db` and `pool` skip unless
 TEST_DATABASE_URL is set, and asyncpg is imported inside the fixtures rather
 than here, so an ordinary `make test` never opens a connection.
 """
@@ -30,6 +37,24 @@ def logs_in_tmp(monkeypatch, tmp_path: Path):
         lambda session_id: JsonlSessionWriter(session_id, log_dir=tmp_path / "logs"),
     )
     return tmp_path / "logs"
+
+
+@pytest.fixture(autouse=True)
+def no_database(monkeypatch):
+    """The pure suite reaches no database, whatever `.env` says.
+
+    `db.enabled()` is `_pool is not None`, so clearing the pool is enough for
+    every caller; `connect` is stubbed as well because `TestClient` runs
+    `lifespan`, which would otherwise dial out before a single test body ran.
+    """
+    from services.core import db
+
+    monkeypatch.setattr(db, "_pool", None)
+    monkeypatch.setattr(db, "connect", _never_connect)
+
+
+async def _never_connect() -> None:
+    raise AssertionError("the pure suite must not open a database connection")
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +123,26 @@ async def schema(database_url):
     finally:
         await conn.close()
     yield scratch
+
+
+@pytest.fixture
+async def pool(schema):
+    """A real asyncpg pool, for the code that takes one rather than a connection.
+
+    No rollback here — a pool hands out a different connection per call, so a
+    wrapping transaction would not contain the writes. Tests scope their
+    assertions to ids they generated instead, which the append-only triggers
+    force anyway: rows in `transcript.events` cannot be deleted afterwards.
+    """
+    import asyncpg
+
+    from services.core import db as db_module
+
+    p = await asyncpg.create_pool(schema, min_size=1, max_size=4, init=db_module._codecs)
+    try:
+        yield p
+    finally:
+        await p.close()
 
 
 @pytest.fixture

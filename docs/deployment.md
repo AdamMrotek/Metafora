@@ -77,8 +77,8 @@ no CORS, and `ALLOWED_ORIGINS` stops mattering.
 
 ## 4 · What blocks a deploy today
 
-Six were found. **Four are now closed** (roadmap Phase 0, 2026-08-24); the two that remain are
-owned by later phases, so nothing on this list is loose.
+Six were found. **All six are now closed** — four by roadmap Phase 0 and the last two by
+Phase 1, both on 2026-08-24.
 
 ### Closed
 
@@ -104,20 +104,21 @@ owned by later phases, so nothing on this list is loose.
    and waits for the cancellation to land. Held by
    `tests/test_app.py::test_teardown_waits_for_the_goodbye_instead_of_cutting_it_off`.
 
-All four are covered by `tests/test_app.py`, which fakes the LiveKit bot
+4. ~~**Session logs land on ephemeral disk.**~~ Closed by Phase 1, not by a volume.
+   `PostgresSessionWriter` writes `transcript.events` instead; the JSONL writer is what a laptop
+   with no `DATABASE_URL` gets, and a call takes one path or the other, never both. `append`
+   stays synchronous and non-blocking — it queues, and a background task batches the inserts —
+   because it is called on every turn from the same task that is decoding audio.
+
+6. ~~**`queue.py` is one hardcoded patient.**~~ `next_interview()` is gone. `resolve_interview()`
+   mints an ephemeral synthetic patient per visitor (`clinical.patients.origin = 'demo'`), and
+   both it and Phase 5's emailed link end at the same `claim()` — `queued → running`, `skip
+   locked`, so two tabs on one link start one call.
+
+Blockers 1, 2, 3 and 5 are covered by `tests/test_app.py`, which fakes the LiveKit bot
 (`tests/fakes.py`) so the HTTP surface is testable with no SFU, no Groq key and no network.
-
-### Still open, and owned
-
-4. **Session logs land on ephemeral disk.** `services/agent/session_log.py:198` writes
-   `logs/<sessionId>.jsonl` under the repo root. **Owned by roadmap Phase 1** — Postgres lands
-   before the deploy, so this is solved rather than papered over with a volume. See §6.
-
-6. **`queue.py` is one hardcoded patient.** Everyone who opens the deployed URL becomes Alice —
-   in their own room, so concurrent visitors do not collide, they are just all called Alice.
-   **Owned by roadmap Phase 3**, and it stopped being cosmetic once the rows persist: the demo
-   link mints an ephemeral synthetic patient per visitor, and real per-patient dispatch arrives
-   in Phase 5.
+Blockers 4 and 6 are covered by `tests/test_persistence.py`, which needs a real Postgres and runs
+under `make test-pg`.
 
 ---
 
@@ -154,9 +155,9 @@ audio archival. That work *is* asynchronous, *is* retryable, must survive a cras
 run inside the media process, which is latency-critical and CPU-bound by VAD and turn detection.
 That is a textbook queue, and a better thing to build than a decorated dispatch.
 
-**Bookkeeping.** Adding Supabase makes it a second egress, so CLAUDE.md's *"Groq is the only
-egress"* invariant becomes false. Update that line in the same change; a reader who trusts the
-docs and then reads the code should not find drift.
+**Bookkeeping.** Adding Supabase made it a second egress, so CLAUDE.md's *"Groq is the only
+egress"* invariant became false. Done in the same change (Phase 1): the file now names both, and
+says which one is optional in dev.
 
 ---
 

@@ -53,7 +53,13 @@ def system_prompt(protocol: ProtocolVersion, interview: QueuedInterview) -> str:
             "acknowledge it in a few words and ask the next. If an answer is unclear, ask"
             " once more;",
             "if it is still unclear, accept what they did say and move on.",
-            "When every question is answered, say goodbye warmly and stop.",
+            "The last question on the list is the closing one. Ask it on its own and let"
+            " them answer;",
+            "the goodbye comes after what they say, never folded into the same breath as"
+            " the question.",
+            "If they raise something new there, take it in and thank them for it — you are"
+            " not there to",
+            "resolve it. Then say goodbye warmly and stop.",
             "",
             "You are not a clinician. Do not diagnose, do not advise, and do not"
             " interpret symptoms.",

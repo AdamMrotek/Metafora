@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from services.agent.config.protocol import PROTOCOLS
 from services.agent.pipeline import build_bot
 from services.agent.session_log import ErrorEvent, PatientJoined, RoomJoined
+from services.core import db
 from services.core.config import (
     ALLOWED_ORIGINS,
     GROQ_API_KEY,
@@ -35,7 +36,7 @@ from services.core.config import (
     RATE_LIMIT_WINDOW_S,
 )
 from services.core.limits import RateLimiter
-from services.core.queue import next_interview
+from services.core.queue import resolve_interview
 from services.core.store import Session, create_session, end_session, get_session, live_sessions
 from services.core.tokens import mint_token
 from shared.contracts.wire import SessionBootstrap
@@ -71,12 +72,19 @@ _starts = RateLimiter(burst=RATE_LIMIT_BURST, window_s=RATE_LIMIT_WINDOW_S)
 async def lifespan(app: FastAPI):
     if not GROQ_API_KEY:
         logger.warning("GROQ_API_KEY is not set — calls will fail at the first turn")
+    # The record before the first caller: `clinical.interviews` references
+    # `config.protocols`, so nothing can be dispatched until it is populated.
+    await db.connect()
+    await db.seed_protocols()
+    if not db.enabled():
+        logger.warning("no DATABASE_URL — this process forgets every call when it restarts")
     logger.info(
         f"metafora · livekit {LIVEKIT_URL} (browsers dial {LIVEKIT_PUBLIC_URL}) "
         f"· origins {ALLOWED_ORIGINS} · cap {MAX_CONCURRENT_SESSIONS} calls"
     )
     yield
     await drain("server_shutdown")
+    await db.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -151,13 +159,13 @@ async def start_session(request: Request):
         logger.warning(f"[session] refused {caller}: at capacity")
         raise HTTPException(503, BUSY_MESSAGE, headers={"Retry-After": "60"})
 
-    interview = next_interview()
+    interview = await resolve_interview()
     protocol = PROTOCOLS.get(interview.protocol_id)
     if protocol is None:
         raise HTTPException(500, f"unknown protocol {interview.protocol_id}")
 
     # 1 ─ the record
-    session = create_session(interview, protocol)
+    session = await create_session(interview, protocol)
 
     try:
         async def _on_blocked(result) -> None:
@@ -285,7 +293,7 @@ async def _run(session: Session, bot) -> None:
         # closure): those reasons arrive on the writer, because the bot may not
         # reach the session record. Anything else is a pipeline that just ran
         # out of work.
-        end_session(
+        await end_session(
             session, session.ended_reason or session.writer.ending_reason or "pipeline_finished"
         )
         # A pipeline-initiated end leaves the patient in a silent room unless
@@ -295,6 +303,10 @@ async def _run(session: Session, bot) -> None:
             await bot.transport.disconnect()
         except Exception:
             logger.warning(f"[session] transport disconnect failed for {session.id}")
+        # Last, because everything above can still append. Idempotent, and
+        # `teardown` closes too — a pipeline that ends itself never reaches
+        # `teardown`, and a call that failed to start never reaches here.
+        await session.writer.close()
 
 
 @app.post("/session/{session_id}/typed")
@@ -360,7 +372,7 @@ async def teardown(session_id: str, reason: str) -> None:
     session = get_session(session_id)
     if session is None or session.ended:
         return
-    end_session(session, reason)
+    await end_session(session, reason)
 
     bot = session.bot
     if bot is not None:
@@ -374,7 +386,15 @@ async def teardown(session_id: str, reason: str) -> None:
     if watchdog and not watchdog.done():
         watchdog.cancel()
 
-    await _await_goodbye(session_id, _tasks.pop(session_id, None))
+    task = _tasks.pop(session_id, None)
+    await _await_goodbye(session_id, task)
+    # Only when no pipeline ever ran — a call that failed to start. Otherwise
+    # `_run`'s finally is the authoritative close, and it has to be: reached
+    # from inside the pipeline's own task (the patient hanging up) the wait
+    # above returns immediately, and closing here would drop the goodbye's own
+    # events on the floor.
+    if task is None:
+        await session.writer.close()
 
 
 async def _await_goodbye(session_id: str, task: asyncio.Task | None) -> None:

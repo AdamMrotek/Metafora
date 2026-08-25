@@ -102,11 +102,8 @@ metafora.care/
 |   |-- agent/           the conversation loop: transport, ask, listen, decide, checkpoint
 |   `-- comms/           anything that leaves the perimeter: email, placing a call (unstarted)
 |
-|-- db/                  one folder of migrations per store
-|   |-- clinical/
-|   |-- transcript/
-|   |-- config/
-|   `-- metrics/
+|-- supabase/            the schema: one migration directory, one schema per store
+|   `-- migrations/
 |
 `-- docs/                every document in the project
     |-- system-map.md    this page
@@ -121,9 +118,11 @@ the rules and names no technologies; [`pieces.md`](./pieces.md) is the state of 
 the only place a technology choice may appear.
 
 **Schema and migrations.** A migration is owned by the **store**, not by whichever service
-happens to be its only writer today, which is why `db/` is a peer of the others rather than
-living inside `services/core/`. Types are generated one way from it into `shared/contracts`,
-never hand-copied and never imported backwards.
+happens to be its only writer today, which is why the migration directory is a peer of the
+others rather than living inside `services/core/`. The stores share one database and take a
+schema each, because the boundary that matters is which code may touch which table, not which
+host it sits on. Types are generated one way from `shared/contracts`, never hand-copied and
+never imported backwards.
 
 **Folders are not deployments.** The tree says where code lives and what may call what; what
 actually runs is fewer, larger processes on the split in §1. How they are released is a separate

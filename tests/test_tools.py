@@ -40,12 +40,26 @@ async def call(machine, writer, wire, **kwargs):
     )
 
 
+async def run_to_the_end(machine, writer, wire):
+    """Both of the warm-up's questions answered: its own, and the closing one
+    every protocol carries. Only the second one completes the interview."""
+    await call(machine, writer, wire)
+    await call(
+        machine, writer, wire,
+        arguments='{"field": "anything_else", "value": "no, nothing"}',
+    )
+
+
+#: What `machine.captured` looks like before a single field has landed.
+NOTHING_CAPTURED = {"day_mood": None, "anything_else": None}
+
+
 async def test_an_authorised_call_records_the_field():
     machine, writer, wire = setup()
     result = await call(machine, writer, wire)
 
     assert result == {"ok": True, "recorded": "day_mood"}
-    assert machine.captured == {"day_mood": "pretty good"}
+    assert machine.captured == {"day_mood": "pretty good", "anything_else": None}
     assert [e for e in writer.events if isinstance(e, ToolCalled)][0].authorised is True
 
 
@@ -58,14 +72,25 @@ async def test_the_notes_card_repaints_the_moment_the_field_lands():
 
 
 async def test_capturing_the_last_field_completes_the_interview():
-    """A question is done once its field is captured. Nothing else advances."""
+    """A question is done once its field is captured. Nothing else advances.
+
+    The last field is `anything_else`, not the one the protocol authored — the
+    call is not over until the patient has been asked what *they* want to raise
+    and has answered.
+    """
     machine, writer, wire = setup()
     await call(machine, writer, wire)
+    assert machine.complete is False
 
+    await call(
+        machine, writer, wire,
+        arguments='{"field": "anything_else", "value": "no, nothing"}',
+    )
     assert machine.complete is True
-    transition = [e for e in writer.events if isinstance(e, StateTransition)][0]
-    assert transition.model_dump(by_alias=True)["from"] == "s1.q1"
-    assert transition.to == "complete"
+
+    transitions = [e for e in writer.events if isinstance(e, StateTransition)]
+    assert [t.model_dump(by_alias=True)["from"] for t in transitions] == ["s1.q1", "close.q1"]
+    assert [t.to for t in transitions] == ["close.q1", "complete"]
 
 
 async def test_a_tool_the_protocol_never_declared_is_refused():
@@ -74,7 +99,7 @@ async def test_a_tool_the_protocol_never_declared_is_refused():
 
     assert result["ok"] is False
     assert "not in protocol" in result["error"]
-    assert machine.captured == {"day_mood": None}
+    assert machine.captured == NOTHING_CAPTURED
 
 
 async def test_a_field_the_protocol_never_declared_is_refused():
@@ -83,7 +108,7 @@ async def test_a_field_the_protocol_never_declared_is_refused():
         machine, writer, wire, arguments='{"field": "nhs_number", "value": "123"}'
     )
     assert result["ok"] is False
-    assert machine.captured == {"day_mood": None}
+    assert machine.captured == NOTHING_CAPTURED
 
 
 async def test_malformed_arguments_are_refused_rather_than_guessed_at():
@@ -104,7 +129,7 @@ async def test_arguments_already_parsed_by_the_framework_are_accepted():
 
 async def test_a_call_after_the_interview_is_complete_is_refused():
     machine, writer, wire = setup()
-    await call(machine, writer, wire)
+    await run_to_the_end(machine, writer, wire)
     result = await call(machine, writer, wire, arguments='{"field":"day_mood","value":"again"}')
 
     assert result["ok"] is False

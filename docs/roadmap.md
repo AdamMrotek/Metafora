@@ -17,27 +17,45 @@ where they run.
 - Postgres schema applied — `supabase/migrations/`, project `xonnqmdzmhlchfawsquk` (eu-west-2).
   `config.protocols`, `clinical.patients`, `clinical.interviews`, `transcript.events`,
   `clinical.results`. Append-only triggers under test (`make test-pg`).
+- **Persistence — Phase 1, below.** A call now survives the process that ran it.
 
 ---
 
-## 1 · Persistence
+## 1 · Persistence — **done**
 
-*Why now:* everything clinician-facing needs a queryable record, and landing it before the deploy
-means no Fly volume for `logs/`. The claim (`queued → running`) is shared by every kind of
-arrival, so it is cheaper to write here than to retrofit at Phase 5.
+Numbers are kept as they were: the later phases, `deployment.md` and the migrations refer to each
+other by number, and shifting them would break every one of those references.
 
-- `PostgresSessionWriter` beside `JsonlSessionWriter` in `session_log.py` → `transcript.events`.
-  Nothing in `services/agent/` else changes.
-- `store.py` splits: live handles (`bot`, `machine`, task) stay a process dict, the record goes to
-  Postgres behind the same `create_session` / `get_session` / `end_session` signatures.
+*Why it went first:* everything clinician-facing needs a queryable record, and landing it before
+the deploy meant no Fly volume for `logs/`. The claim (`queued → running`) is shared by every kind
+of arrival, so it was cheaper to write here than to retrofit at Phase 5.
+
+- `PostgresSessionWriter` in `session_log.py` → `transcript.events`. **Instead of**
+  `JsonlSessionWriter`, not beside it: a call takes one path or the other, decided by whether
+  `DATABASE_URL` is set. Nothing in `services/agent/` else changed. `append` stays synchronous
+  and non-blocking — it queues and a background task batches the inserts — because it runs on
+  every turn inside the task that is decoding audio.
+- `store.py` split: live handles (`bot`, `machine`, writer) stay a process dict, the record goes
+  to Postgres. `create_session` / `end_session` became `async`; `get_session` / `live_sessions`
+  did not, because they only read the dict.
+- `end_session` also writes `clinical.results` from `machine.fields()`, so Phase 4's composer has
+  rows to render without replaying a transcript.
 - `queue.py` → `resolve_interview(token: str | None)`:
-  - token → `clinical.invitations` lookup — stub, filled in at Phase 5
-  - no token → mint an ephemeral synthetic patient + interview
+  - token → `clinical.invitations` lookup — stub (`UnknownInvitation`), filled in at Phase 5
+  - no token → mint an ephemeral synthetic patient + interview, `origin = 'demo'`
   - both → `claim()`: `queued → running`, `SKIP LOCKED`, no-op if already running
+- `services/core/db.py` — the only pool. `enabled()` reads the pool, never the environment, so a
+  test that never ran `lifespan` cannot reach a database whatever `.env` says.
 - Migration: `clinical.patients.origin` (`'demo' | 'dispatched'`).
-- Seed `config.protocols` from `services/agent/config/protocol.py`.
-- Delete the empty `db/*` placeholders.
-- Fix `CLAUDE.md` ("Groq is the only egress") and `system-map.md` ("no database").
+- `config.protocols` seeded from `services/agent/config/protocol.py` at boot, `on conflict do
+  nothing` so it survives a restart against an append-only table.
+- Empty `db/*` placeholders deleted; `CLAUDE.md`, `system-map.md`, `.env.example` and
+  `deployment.md` §4 corrected.
+- Tests: `tests/test_persistence.py` (`make test-pg`) for the database half,
+  `tests/test_queue.py` and `tests/test_store.py` for the no-database half.
+
+**No `DATABASE_URL` is still supported**, not a fallback: JSONL on disk and an in-process store,
+which is what `make dev` uses on a laptop with nothing provisioned.
 
 **Done:** complete a call, restart the process, query the row. Two callers at once get two rows.
 

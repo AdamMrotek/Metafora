@@ -35,8 +35,12 @@ Clinician: **Sister J. Okoro**, Springfield Day Surgery Unit —
 | 3 | `s2.q1` | "Nothing to eat from midnight, water until six, nothing after. Is that clear?" | `fasting_ack` | boolean | ✓ |
 | 4 | `s2.q2` | "You were asked to stop your apixaban on Monday. Were you able to?" | `meds_stopped` | enum · `stopped / still_taking / unsure` | ✓ |
 | 5 | `s2.q3` | "Has anything changed with your health since your pre-op appointment — cough, cold, temperature, new medicines?" | `health_change` | text | ✓ |
+| 6 | `close.q1` | "Before we finish, is there anything else you would like to talk about?" | `anything_else` | text | — |
 
-Sections: `s1` *Getting there*, `s2` *Before you come in*.
+Sections: `s1` *Getting there*, `s2` *Before you come in*, `close` *Anything
+else*. The unit authored the first two. `close` is appended to every published
+script the way `rf_self_harm` is prepended to every flag list — same wording
+every time, not the author's to reword or remove.
 
 Questions 3 and 4 are **reminders wearing a question mark**. The point is that
 the instruction is said out loud and the answer is written down, not that
@@ -92,15 +96,22 @@ that ran and cleared on every turn.
 | **P** | "Yes — Sunday night was the last one." | clear |
 | **A** | "Thank you. Last one: has anything changed with your health since your pre-op appointment? Any cough, cold, temperature, new medicines?" | `meds_stopped` → `stopped` |
 | **P** | "Well, I've had a chesty **cough** since the weekend and the GP started me on **antibiotics** on Monday. I'm a bit **nervous** about the anaesthetic with all that, to be honest." | 🔴 `rf_fitness_change` + `nf_anxiety` → turn action `urgent_escalate` |
-| **A** | "Thank you for telling me — that's exactly what they need to know before Thursday, and I've written it down. Someone from the unit will call you today about that and about the rearranging. Take care, Ruth." | `health_change` ✓ · ends |
+| **A** | "Thank you for telling me — that's exactly what they need to know before Thursday, and I've written it down. Someone from the unit will call you today about that and about the rearranging. Before we finish, is there anything else you'd like to talk about?" | `health_change` ✓ |
+| **P** | "No, nothing else. I've been **dreading** the whole thing, if I'm honest." | 🔵 `nf_anxiety` → turn action `note_only` |
+| **A** | "That's very understandable, and I've made a note of it so they know before you come in. Take care, Ruth." | `anything_else` ✓ · ends |
 
-Five fields for five questions. The interview **completed**, and it is also an
-escalation.
+Six fields for six questions. The last one is `CLOSING`, which the unit did not
+author and cannot drop: every protocol ends by asking the patient what *they*
+want to raise, and the answer is recorded like any other. It is a question and
+not a closing pleasantry in the prompt precisely because of the turn above —
+the gate runs on it, and what Ruth says there reaches the record.
+
+The interview **completed**, and it is also an escalation.
 
 ## What each surface does with it
 
 **Patient portal.** Unremarkable, which is the point: `listening → speaking →
-ended`, the notes card filling five rows. Ruth is never shown a flag, because
+ended`, the notes card filling six rows. Ruth is never shown a flag, because
 only `end_call` blocks and only `end_call` carries a `say`.
 
 **Clinician dashboard.** The escalation band stops meaning "someone is
@@ -108,9 +119,9 @@ deteriorating" and starts meaning **"Thursday's list is wrong"**. It carries
 Ruth's own words — *"chesty cough since the weekend… antibiotics on Monday"* —
 a clock since the call ended, and one button; the decision owed is *proceed /
 move / cancel*, by a human, before the unit closes. The review row reads
-Ruth · Pre-op check · 5/5 · **Urgent escalation**, with the yellow beneath it:
+Ruth · Pre-op check · 6/6 · **Urgent escalation**, with the yellow beneath it:
 *attendance at risk — call back today*. In the transcript pane every turn
-shows five scans, four of them cleared.
+shows six scans, three of them cleared.
 
 **Agent studio.** The tests are authored with the config and stored with it:
 

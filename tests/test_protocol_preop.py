@@ -1,6 +1,6 @@
 """`docs/example-interview.md`, executed.
 
-`WARMUP_V1` has one question and one flag, so a whole class of behaviour is
+`WARMUP_V1` has one authored question and one flag, so a whole class of behaviour is
 unreachable through it: nothing crosses a section boundary, no turn hits two
 flags at once, and the only action that can fire is the one that stops the
 call. `PREOP_CHECK_V1` is the first protocol where the compile step, the
@@ -18,8 +18,17 @@ from services.agent.machine import InterviewMachine
 from services.agent.safety import scan
 from services.agent.tools import dispatch
 
-STATES = ["s1.q1", "s1.q2", "s2.q1", "s2.q2", "s2.q3"]
-FIELDS = ["attendance", "escort_home", "fasting_ack", "meds_stopped", "health_change"]
+# The last of each is `CLOSING`, which the protocol does not author and cannot
+# drop: every script ends by asking the patient what they want to raise.
+STATES = ["s1.q1", "s1.q2", "s2.q1", "s2.q2", "s2.q3", "close.q1"]
+FIELDS = [
+    "attendance",
+    "escort_home",
+    "fasting_ack",
+    "meds_stopped",
+    "health_change",
+    "anything_else",
+]
 
 
 class RecordingWriter:
@@ -53,6 +62,7 @@ def test_two_sections_compile_into_one_ordered_run_of_states():
         "Before you come in",
         "Before you come in",
         "Before you come in",
+        "Anything else",
     ]
 
 
@@ -60,7 +70,7 @@ def test_the_notes_card_spans_both_sections_in_script_order():
     m = InterviewMachine(PREOP)
     fields = m.fields()
     assert [f.key for f in fields] == FIELDS
-    assert [f.status for f in fields] == ["live", "pending", "pending", "pending", "pending"]
+    assert [f.status for f in fields] == ["live"] + ["pending"] * 5
 
 
 def test_the_tool_matrix_names_every_state_the_interview_can_be_in():
@@ -149,8 +159,11 @@ def test_a_turn_that_hits_two_flags_is_ranked_and_keeps_both_on_the_record():
 
 # ─── the call in the doc, end to end ─────────────────────────────────────────
 
-#: Ruth's five turns: what she says, what the gate makes of it, and the field
-#: the capture pass records off the back of it.
+#: Ruth's turns: what she says, what the gate makes of it, and the field the
+#: capture pass records off the back of it. The doc's call is the first five;
+#: the sixth is the closing question every protocol ends on, and it is here
+#: because the gate runs on that turn like any other — an open turn is where a
+#: patient says the thing no question asked for.
 CALL = [
     (
         "I think so. My mum's been poorly, so I might have to rearrange — "
@@ -170,13 +183,20 @@ CALL = [
         "urgent_escalate",
         "health_change",
     ),
+    (
+        "No, nothing else. I've been dreading the whole thing, if I'm honest.",
+        {"nf_anxiety"},
+        "note_only",
+        "anything_else",
+    ),
 ]
 
 
 async def test_the_call_completes_and_is_also_an_escalation():
-    """Five fields for five questions, no turn withheld from the model, and a
+    """Six fields for six questions, no turn withheld from the model, and a
     decision owed by a human today. The three dashboard states assume "urgent"
-    means the call stopped; this one ran to the end."""
+    means the call stopped; this one ran to the end — and the end is the closing
+    question, not the last question the unit authored."""
     machine = InterviewMachine(PREOP)
     actions = []
 
@@ -195,6 +215,7 @@ async def test_the_call_completes_and_is_also_an_escalation():
     assert list(machine.captured) == FIELDS
     assert all(machine.captured.values())
     assert "urgent_escalate" in actions and "soft_review" in actions
+    assert actions[-1] == "note_only", "the closing turn goes through the gate too"
 
 
 # ─── gaps this protocol is the first to reach ────────────────────────────────

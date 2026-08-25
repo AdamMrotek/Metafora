@@ -10,9 +10,9 @@ import pytest
 
 from services.agent.config.protocol import PROTOCOLS
 from services.agent.prompts import capture_prompt, system_prompt
-from services.core.queue import next_interview
+from services.core.queue import synthetic_interview
 
-INTERVIEW = next_interview()
+INTERVIEW = synthetic_interview()
 
 #: The split has to hold for every protocol the studio can publish, not only
 #: the one the queue happens to dispatch.

@@ -10,8 +10,14 @@ hello, ask how the day is going. The machinery around it is not.
 
 `PREOP_CHECK_V1` is `docs/example-interview.md` as an object. Nothing dispatches
 it yet; it exists so the compile path, the gate and the tool matrix are
-exercised against a protocol with two sections, five fields and all four
-red-flag actions rather than one question and one flag.
+exercised against a protocol with two authored sections, five authored fields
+and all four red-flag actions rather than one question and one flag.
+
+Two things every protocol here carries without authoring them, and carries
+unchanged: `SELF_HARM` at the front of the flags and `CLOSING` at the end of the
+script. Both are decisions about how a call may treat a patient, which is not a
+per-script choice — so the counts above are of what the author wrote, and every
+protocol compiles to one more state and one more field than that.
 """
 
 from shared.contracts.models import (
@@ -53,6 +59,33 @@ SELF_HARM = RedFlag(
     proving_utterance="sometimes I feel like I want to die",
 )
 
+#: The other thing every protocol carries unchanged. A patient gets one open
+#: turn of their own before the line closes, and whatever they say in it is part
+#: of the record — the concern raised on the way out is often the reason they
+#: took the call.
+#:
+#: A *question* and not a line in the system prompt, because only the script
+#: advances the machine: a closing sentence the model was merely told to say
+#: would be unrecorded, absent from the notes card, and skippable on any turn
+#: the model decided the call was already over. `must_capture=False` for the
+#: same reason the warm-up is — "nothing, thanks" is an answer, but nobody is
+#: owed one.
+CLOSING = Section(
+    id="close",
+    title="Anything else",
+    questions=[
+        Question(
+            id="q1",
+            ask="Before we finish, is there anything else you would like to talk about?",
+            field_key="anything_else",
+            label="Anything else raised",
+            capture=TextCapture(),
+            if_unclear="accept whatever they say, including nothing",
+            must_capture=False,
+        )
+    ],
+)
+
 WARMUP_V1 = ProtocolVersion(
     id="proto_warmup_v1",
     label="Warm-up v1",
@@ -80,7 +113,8 @@ WARMUP_V1 = ProtocolVersion(
                         must_capture=False,
                     )
                 ],
-            )
+            ),
+            CLOSING,
         ]
     ),
     # ── Block II · runs before generation, never as prose in a prompt ──
@@ -98,13 +132,13 @@ WARMUP_V1 = ProtocolVersion(
                 "Record what the patient said for the field currently being asked about. "
                 "Call this as soon as they have answered, using their own words."
             ),
-            allowed_states=["s1.q1"],
+            allowed_states=["s1.q1", "close.q1"],
             max_attempts_per_turn=2,
         )
     ],
     # ── Block VI · the last thing to run ──
     report=ReportGuidance(
-        fields=["day_mood"],
+        fields=["day_mood", "anything_else"],
         rules=[
             "Quote the patient's own words where they are clear.",
             "Say plainly which questions were not asked.",
@@ -128,7 +162,8 @@ PREOP_CHECK_V1 = ProtocolVersion(
     ),
     # ── Block I ──
     #
-    # Two sections, five questions, all of them must-capture. Questions s2.q1
+    # Two authored sections, five authored questions, all of them must-capture,
+    # plus `CLOSING` — which the unit does not author. Questions s2.q1
     # and s2.q2 are reminders wearing a question mark: the point is that the
     # instruction is said out loud and the answer written down, not that
     # anything is evaluated.
@@ -205,6 +240,7 @@ PREOP_CHECK_V1 = ProtocolVersion(
                     ),
                 ],
             ),
+            CLOSING,
         ]
     ),
     # ── Block II ──
@@ -303,13 +339,20 @@ PREOP_CHECK_V1 = ProtocolVersion(
                 "Record what the patient said for the field currently being asked about. "
                 "Call this as soon as they have answered, using their own words."
             ),
-            allowed_states=["s1.q1", "s1.q2", "s2.q1", "s2.q2", "s2.q3"],
+            allowed_states=["s1.q1", "s1.q2", "s2.q1", "s2.q2", "s2.q3", "close.q1"],
             max_attempts_per_turn=2,
         )
     ],
     # ── Block VI ──
     report=ReportGuidance(
-        fields=["attendance", "escort_home", "fasting_ack", "meds_stopped", "health_change"],
+        fields=[
+            "attendance",
+            "escort_home",
+            "fasting_ack",
+            "meds_stopped",
+            "health_change",
+            "anything_else",
+        ],
         rules=[
             "Quote the patient's own words where they are clear.",
             "Say plainly which questions were not asked.",
@@ -319,7 +362,66 @@ PREOP_CHECK_V1 = ProtocolVersion(
 )
 
 
+# ─── The short one ───────────────────────────────────────────────────────────
+
+PREOP_SHORT_V1 = ProtocolVersion(
+    id="proto_preop_short_v1",
+    label="Pre-op check (short) v1",
+    frozen=True,
+    clinician=PREOP_CHECK_V1.clinician,
+    # Two questions lifted verbatim from `PREOP_CHECK_V1` — the same ids, field
+    # keys, labels and capture types, so a value captured here means exactly
+    # what the same key means there. A shortened *copy* rather than a trimmed
+    # original: `config.protocols` is immutable so that a captured field can
+    # always be read back against the question that produced it, and editing
+    # the real protocol would break that for every row already written under it.
+    #
+    # These two and not another two: one per section, so the section transition
+    # is still exercised, and `meds_stopped` is the question the escalation
+    # flag hangs off — a short interview that cannot escalate would be a
+    # smoke test of the wrong thing.
+    script=InterviewScript(
+        sections=[
+            Section(
+                id="s1",
+                title="Getting there",
+                questions=[PREOP_CHECK_V1.script.sections[0].questions[0]],
+            ),
+            Section(
+                id="s2",
+                title="Before you come in",
+                questions=[PREOP_CHECK_V1.script.sections[1].questions[1]],
+            ),
+            CLOSING,
+        ]
+    ),
+    # Every flag that can fire on what these two questions invite. The others
+    # are dropped because nothing here asks about fasting or health changes,
+    # not to make the interview shorter.
+    red_flags=[
+        SELF_HARM,
+        next(f for f in PREOP_CHECK_V1.red_flags if f.id == "rf_anticoagulant_taken"),
+        next(f for f in PREOP_CHECK_V1.red_flags if f.id == "yf_attendance_risk"),
+    ],
+    urgent=PREOP_CHECK_V1.urgent,
+    soft_review=[],
+    tools=[
+        ToolSpec(
+            name="update_intake",
+            description=PREOP_CHECK_V1.tools[0].description,
+            allowed_states=["s1.q1", "s2.q2", "close.q1"],
+            max_attempts_per_turn=2,
+        )
+    ],
+    report=ReportGuidance(
+        fields=["attendance", "meds_stopped", "anything_else"],
+        rules=PREOP_CHECK_V1.report.rules,
+    ),
+)
+
+
 PROTOCOLS: dict[str, ProtocolVersion] = {
     WARMUP_V1.id: WARMUP_V1,
     PREOP_CHECK_V1.id: PREOP_CHECK_V1,
+    PREOP_SHORT_V1.id: PREOP_SHORT_V1,
 }
