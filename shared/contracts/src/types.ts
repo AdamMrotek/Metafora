@@ -122,6 +122,75 @@ export interface FieldState {
   status: FieldStatus;
 }
 
+/** One row of the review table. */
+export interface InterviewSummary {
+  id: string;
+  status: InterviewStatus;
+  /** How the call ended, in the store's vocabulary — `complete`, `safety`, */
+  /** `patient_left`. Null until it has ended. */
+  outcome: string | null;
+  patientId: string;
+  patientFirstName: string;
+  patientOrigin: PatientOrigin;
+  protocolId: string;
+  protocolLabel: string;
+  scheduledFor: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+}
+
+/** One captured field, as the review composer renders it. */
+export interface ResultField {
+  fieldKey: string;
+  label: string;
+  value: string | null;
+  status: FieldStatus;
+  updatedAt: string;
+}
+
+/**
+ * One line of `transcript.events`, as the writer appended it.
+ *
+ * `payload` is the whole event, unflattened, because the union of event shapes
+ * lives in `services/agent/session_log.py` and re-declaring fifteen variants
+ * here to serve one screen would be two sources of truth for the same record.
+ */
+export interface TranscriptEvent {
+  seq: number;
+  type: string;
+  at: string;
+  payload: Record<string, unknown>;
+}
+
+/**
+ * One interview, everything about it, in one request.
+ *
+ * The transcript carries **every** safety scan, including the ones that
+ * matched nothing. A route that filtered them would look identical and would
+ * quietly remove the only evidence that the gate ran on a turn it cleared.
+ */
+export interface InterviewDetail {
+  interview: InterviewSummary;
+  results: ResultField[];
+  events: TranscriptEvent[];
+}
+
+/**
+ * One row of the patients screen: the caller's own list, plus the
+ * unowned demo rows nobody was dispatched.
+ */
+export interface PatientSummary {
+  id: string;
+  firstName: string;
+  origin: PatientOrigin;
+  /** Null for a demo visitor — nobody was dispatched a call to them. */
+  clinicianEmail: string | null;
+  interviewCount: number;
+  lastInterviewAt: string | null;
+  createdAt: string;
+}
+
 export type Capture =
   | { type: 'text' }
   | { type: 'enum'; values: string[] }
@@ -134,3 +203,7 @@ export type RedFlagAction = 'end_call' | 'urgent_escalate' | 'soft_review' | 'no
 export type FieldStatus = 'pending' | 'live' | 'open' | 'captured';
 
 export type CallPhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'ended';
+
+export type InterviewStatus = 'queued' | 'running' | 'completed' | 'abandoned';
+
+export type PatientOrigin = 'demo' | 'dispatched';

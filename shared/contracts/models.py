@@ -15,7 +15,8 @@ the backend consumes TypeScript any more, so the direction of generation
 reversed.
 """
 
-from typing import Annotated, Literal
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -208,3 +209,88 @@ class FieldState(CamelModel):
 
 
 CallPhase = Literal["idle", "listening", "thinking", "speaking", "ended"]
+
+
+# ─── The read surface ────────────────────────────────────────────────────────
+#
+# What `GET /interviews`, `GET /interviews/{id}` and `GET /patients` return.
+# Written here rather than in the router because the dashboard is the other end
+# of them and reads the generated TypeScript, so these shapes are a contract in
+# exactly the sense the rest of this file is.
+
+InterviewStatus = Literal["queued", "running", "completed", "abandoned"]
+
+#: Whether a patient is someone a clinician dispatched a call to, or an artefact
+#: of the public demo link being clicked. A caseload that cannot tell them apart
+#: is a caseload full of strangers.
+PatientOrigin = Literal["demo", "dispatched"]
+
+
+class InterviewSummary(CamelModel):
+    """One row of the review table."""
+
+    id: str
+    status: InterviewStatus
+    #: How the call ended, in the store's vocabulary — `complete`, `safety`,
+    #: `patient_left`. Null until it has ended.
+    outcome: str | None
+    patient_id: str
+    patient_first_name: str
+    patient_origin: PatientOrigin
+    protocol_id: str
+    protocol_label: str
+    scheduled_for: datetime | None
+    started_at: datetime | None
+    ended_at: datetime | None
+    created_at: datetime
+
+
+class ResultField(CamelModel):
+    """One captured field, as the review composer renders it."""
+
+    field_key: str
+    label: str
+    value: str | None
+    status: FieldStatus
+    updated_at: datetime
+
+
+class TranscriptEvent(CamelModel):
+    """One line of `transcript.events`, as the writer appended it.
+
+    `payload` is the whole event, unflattened, because the union of event shapes
+    lives in `services/agent/session_log.py` and re-declaring fifteen variants
+    here to serve one screen would be two sources of truth for the same record.
+    """
+
+    seq: int
+    type: str
+    at: datetime
+    payload: dict[str, Any]
+
+
+class InterviewDetail(CamelModel):
+    """One interview, everything about it, in one request.
+
+    The transcript carries **every** safety scan, including the ones that
+    matched nothing. A route that filtered them would look identical and would
+    quietly remove the only evidence that the gate ran on a turn it cleared.
+    """
+
+    interview: InterviewSummary
+    results: list[ResultField]
+    events: list[TranscriptEvent]
+
+
+class PatientSummary(CamelModel):
+    """One row of the patients screen: the caller's own list, plus the
+    unowned demo rows nobody was dispatched."""
+
+    id: str
+    first_name: str
+    origin: PatientOrigin
+    #: Null for a demo visitor — nobody was dispatched a call to them.
+    clinician_email: str | None
+    interview_count: int
+    last_interview_at: datetime | None
+    created_at: datetime

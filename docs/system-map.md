@@ -30,7 +30,7 @@ reach a patient off-platform.
 | Piece | Used by | What it holds |
 |---|---|---|
 | `shared-ui` | all three apps | Design tokens and components, so the three products look like one product. Front-end only. |
-| `shared-auth` | dashboard, studio | Sign-in, session, roles. `app-call` deliberately does **not** use it — a patient never holds an account credential. |
+| `shared-auth` | `svc-core`, dashboard, studio | What a role is and what it grants. **Built** (Phase 2), and the backend is its first consumer, not the frontend: it verifies the token and resolves the account, and every authorisation decision in the product lives inside it rather than in a route body. `app-call` deliberately does **not** use it — a patient never holds an account credential. |
 | `shared-contracts` | apps + services | The agreed shapes passed between front and back. One definition, both sides. |
 
 ### Services — what runs continuously
@@ -139,6 +139,13 @@ here rather than in code.
    tenant boundary and nothing finer. A denial decided in `svc-core` can be logged and explained; a
    denial decided by a row policy is indistinguishable from a record that does not exist, which is
    the wrong thing to hand a clinician looking for a patient.
+
+   Phase 2 built this and added the habit that keeps the door open to something finer: the check
+   yields an identity, and the *query* takes it as a parameter. Scope is a `where` clause in
+   `svc-core`'s SQL, not a role read at the door and then forgotten. The day rules over
+   relationships are wanted (roadmap §6+), the alternative — Postgres RLS — wants per-request
+   identity on the connection, and `svc-core` holds one pooled service connection. That trade is
+   to be made deliberately, not discovered.
 2. **A service writes the store it produced — `svc-agent` the transcript — and every other
    write goes through `svc-core`.** (The audio leg died with `svc-media`; nothing writes
    `store-media` today, though clinical-research requirements may bring audio retention back.)

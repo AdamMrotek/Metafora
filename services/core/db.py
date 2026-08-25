@@ -41,10 +41,12 @@ async def connect() -> None:
 
     import asyncpg
 
-    # Four connections: the box holds `MAX_CONCURRENT_SESSIONS` (3) calls by
-    # construction and there are no read routes until Phase 2, so a larger pool
-    # would only be idle sockets against a hosted Postgres that counts them.
-    _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=4, init=_codecs)
+    # Six connections. The box holds `MAX_CONCURRENT_SESSIONS` (3) calls by
+    # construction, and Phase 2 added the dashboard's reads on top of that —
+    # short queries, but they must not queue behind a transcript batch while a
+    # clinician watches a spinner. Still small, because a hosted Postgres counts
+    # sockets and an idle one is not free.
+    _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=6, init=_codecs)
     logger.info("postgres · pool open")
 
 
