@@ -1,11 +1,12 @@
 """Shared fixtures.
 
-Four jobs. Keep session logs out of the repo's own `logs/` directory — a test
+Five jobs. Keep session logs out of the repo's own `logs/` directory — a test
 that creates a session would otherwise leave a real JSONL file behind — reset
 the module-level state that `services/core` deliberately holds in-process, so
 tests cannot leak sessions, tasks or spent rate-limit tokens into each other,
-and hold the pure suite's "no key, no LiveKit, no database" property against a
-developer `.env` that names a real project.
+clear the authenticator `shared/auth` holds in another one, and hold the pure
+suite's "no key, no LiveKit, no database" property against a developer `.env`
+that names a real project.
 
 That last one is `no_database`, and it is not a formality. `config.py` reads
 `.env` at import and this repo's own `.env` has a populated `DATABASE_URL`, so
@@ -58,26 +59,42 @@ async def _never_connect() -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_authenticator():
+    """No test inherits the door another test installed.
+
+    `shared/auth` holds the authenticator in a module global, exactly as
+    `services/core` holds live sessions in one, and for the same reason: there
+    is one per process. Clearing it before every test means the default posture
+    under test is the deployed one — unconfigured refuses, it does not admit.
+    """
+    from shared import auth
+
+    auth.configure(None)
+    yield
+    auth.configure(None)
+
+
+@pytest.fixture(autouse=True)
 async def fresh_state():
     """The backend is stateful by design (it holds live WebRTC connections), so
     the state is module-level and has to be swept between tests rather than
     constructed per test.
     """
-    from services.core import app as app_module
-    from services.core import store
+    from services.core import lifecycle, store
+    from services.core.routes import session as session_routes
 
     yield
 
-    for task in [*app_module._tasks.values(), *app_module._watchdogs.values()]:
+    for task in [*lifecycle._tasks.values(), *lifecycle._watchdogs.values()]:
         task.cancel()
     # Let the cancellations actually land before the next test starts a call.
     await asyncio.gather(
-        *[*app_module._tasks.values(), *app_module._watchdogs.values()],
+        *[*lifecycle._tasks.values(), *lifecycle._watchdogs.values()],
         return_exceptions=True,
     )
-    app_module._tasks.clear()
-    app_module._watchdogs.clear()
-    app_module._starts._buckets.clear()
+    lifecycle._tasks.clear()
+    lifecycle._watchdogs.clear()
+    session_routes._starts._buckets.clear()
     store._sessions.clear()
 
 

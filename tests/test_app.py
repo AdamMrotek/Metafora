@@ -15,10 +15,12 @@ import asyncio
 import httpx
 import pytest
 
-from services.core import app as app_module
-from services.core import store
-from services.core.app import BUSY_MESSAGE, TYPED_USER_ID, _wire_reason, app, drain
+from services.core import lifecycle, store
+from services.core.app import app
+from services.core.lifecycle import _wire_reason, drain
 from services.core.limits import RateLimiter
+from services.core.routes import session as session_routes
+from services.core.routes.session import BUSY_MESSAGE, TYPED_USER_ID
 from tests import fakes
 
 
@@ -34,7 +36,9 @@ def client(ip: str = "203.0.113.7") -> httpx.AsyncClient:
 
 @pytest.fixture
 def bots(monkeypatch):
-    return fakes.install(monkeypatch, app_module)
+    """Both halves of the call live in `lifecycle` — the bot it builds and the
+    runner it drives — so one module is still the whole substitution."""
+    return fakes.install(monkeypatch, lifecycle)
 
 
 async def start(http: httpx.AsyncClient) -> httpx.Response:
@@ -51,7 +55,7 @@ async def test_health_reports_capacity_not_just_liveness():
     assert body["live"] == 0
     # An operator at 3am needs to know how close to full it is, not only that
     # it answered.
-    assert body["capacity"] == app_module.MAX_CONCURRENT_SESSIONS
+    assert body["capacity"] == session_routes.MAX_CONCURRENT_SESSIONS
 
 
 # ─── the ordering guarantee ──────────────────────────────────────────────────
@@ -62,13 +66,13 @@ async def test_patient_token_is_minted_only_after_the_assistant_is_connected(bot
     patient could join an empty room and sit there.
     """
     order: list[str] = []
-    real_mint = app_module.mint_token
+    real_mint = lifecycle.mint_token
 
     def recording_mint(room: str, identity: str, **kwargs):
         order.append(f"mint:{identity.split('-')[0]}")
         return real_mint(room, identity, **kwargs)
 
-    monkeypatch.setattr(app_module, "mint_token", recording_mint)
+    monkeypatch.setattr(lifecycle, "mint_token", recording_mint)
 
     transport_fire = fakes.FakeTransport.fire
 
@@ -86,8 +90,8 @@ async def test_patient_token_is_minted_only_after_the_assistant_is_connected(bot
 
 async def test_session_hands_the_browser_the_public_url(bots, monkeypatch):
     """The backend may dial the SFU on an address no browser can resolve."""
-    monkeypatch.setattr(app_module, "LIVEKIT_PUBLIC_URL", "wss://public.example")
-    monkeypatch.setattr(app_module, "LIVEKIT_URL", "ws://internal:7880")
+    monkeypatch.setattr(session_routes, "LIVEKIT_PUBLIC_URL", "wss://public.example")
+    monkeypatch.setattr(lifecycle, "LIVEKIT_URL", "ws://internal:7880")
 
     async with client() as http:
         body = (await start(http)).json()
@@ -222,7 +226,7 @@ async def test_teardown_waits_for_the_goodbye_instead_of_cutting_it_off(bots):
     """
     async with client() as http:
         session_id = (await start(http)).json()["session"]["sessionId"]
-        task = app_module._tasks[session_id]
+        task = lifecycle._tasks[session_id]
         await http.post(f"/session/{session_id}/end")
 
     assert task.done()
@@ -234,12 +238,12 @@ async def test_teardown_waits_for_the_goodbye_instead_of_cutting_it_off(bots):
 
 async def test_a_pipeline_that_will_not_stop_is_cancelled_anyway(bots, monkeypatch):
     """The wait is bounded: a hung TTS call must not hold a deploy open."""
-    monkeypatch.setattr(app_module, "GOODBYE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(lifecycle, "GOODBYE_TIMEOUT_S", 0.01)
 
     async with client() as http:
         session_id = (await start(http)).json()["session"]["sessionId"]
         bots.latest.worker.wedged = True  # ignores the EndFrame
-        task = app_module._tasks[session_id]
+        task = lifecycle._tasks[session_id]
         await http.post(f"/session/{session_id}/end")
 
     assert task.cancelled() or task.done()
@@ -248,7 +252,7 @@ async def test_a_pipeline_that_will_not_stop_is_cancelled_anyway(bots, monkeypat
 
 async def test_call_past_the_ceiling_is_hung_up(bots, monkeypatch):
     """A tab left open holds one of very few concurrency slots."""
-    monkeypatch.setattr(app_module, "MAX_CALL_SECONDS", 0)
+    monkeypatch.setattr(lifecycle, "MAX_CALL_SECONDS", 0)
 
     async with client() as http:
         session_id = (await start(http)).json()["session"]["sessionId"]
@@ -266,7 +270,7 @@ async def test_call_past_the_ceiling_is_hung_up(bots, monkeypatch):
 
 
 async def test_at_capacity_the_next_caller_is_refused(bots, monkeypatch):
-    monkeypatch.setattr(app_module, "MAX_CONCURRENT_SESSIONS", 1)
+    monkeypatch.setattr(session_routes, "MAX_CONCURRENT_SESSIONS", 1)
 
     async with client() as http:
         assert (await start(http)).status_code == 200
@@ -280,7 +284,7 @@ async def test_at_capacity_the_next_caller_is_refused(bots, monkeypatch):
 
 
 async def test_rate_limit_refuses_a_loop_but_not_a_second_patient(bots, monkeypatch):
-    monkeypatch.setattr(app_module, "_starts", RateLimiter(burst=1, window_s=300))
+    monkeypatch.setattr(session_routes, "_starts", RateLimiter(burst=1, window_s=300))
 
     async with client(ip="198.51.100.1") as looper:
         assert (await start(looper)).status_code == 200

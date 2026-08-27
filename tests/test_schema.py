@@ -7,6 +7,10 @@ because the record of a call does not change. Both are enforced by trigger, and
 a trigger is exactly the kind of thing a later migration drops by accident —
 so it is asserted here rather than assumed.
 
+Phase 2 adds a third of the same kind. `clinical.patients.clinician_email`
+references `config.accounts`, which is what stops a caseload being assigned to
+an address nobody granted.
+
 Deselected by default. `make test-pg` supplies TEST_DATABASE_URL.
 """
 
@@ -140,3 +144,67 @@ async def test_the_queue_read_uses_its_index(db):
         "order by scheduled_for nulls first, created_at limit 1"
     )
     assert "interviews_queued" in plan
+
+
+# ─── config.accounts ─────────────────────────────────────────────────────────
+
+
+async def test_the_migration_seeds_an_account_to_sign_in_as(db):
+    """Seeded by the migration, never by the application: signing up must not be
+    the same act as being granted a caseload, which on a public demo URL is
+    exactly what self-serve would mean. A deployment whose seed is empty has no
+    way in at all, so the row is asserted rather than assumed."""
+    seeded = await db.fetch(
+        "select email, role from config.accounts where role in ('clinician', 'admin')"
+    )
+
+    assert seeded, "the migration seeds at least one account with a caseload"
+
+
+# `sub` starts null and is bound on first verified sign-in — asserted in
+# `tests/test_reads.py`, against the code that does the binding, rather than
+# here: the scratch database is shared across the postgres suite and only the
+# rows a test names are its own.
+
+
+async def test_an_account_may_not_hold_a_role_the_door_does_not_know(db):
+    with pytest.raises(asyncpg.CheckViolationError):
+        await db.execute(
+            "insert into config.accounts (email, role, display_name) "
+            "values ('nobody@example.test', 'superuser', 'Nobody')"
+        )
+
+
+async def test_two_accounts_cannot_share_one_auth_user(db):
+    """`sub` is bound the first time a verified token arrives. Two rows holding
+    the same one would mean a single sign-in resolving to two caseloads."""
+    await db.execute(
+        "insert into config.accounts (email, role, display_name, sub) "
+        "values ('a@schema.test', 'clinician', 'A', 'auth-user-schema-1')"
+    )
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await db.execute(
+            "insert into config.accounts (email, role, display_name, sub) "
+            "values ('b@schema.test', 'clinician', 'B', 'auth-user-schema-1')"
+        )
+
+
+async def test_a_patient_cannot_be_owned_by_an_account_nobody_granted(db):
+    """The column is a foreign key, not a free-text email, so a dispatch cannot
+    assign a caseload to an address the seed never named."""
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await db.execute(
+            "insert into clinical.patients (id, first_name, origin, clinician_email) "
+            "values ('pt_orphan', 'Ada', 'dispatched', 'ghost@example.test')"
+        )
+
+
+async def test_a_demo_patient_has_no_owner(db):
+    """Nullable on purpose: a visitor to the public demo is nobody's patient,
+    and Phase 5's dispatch is the only thing that ever sets this."""
+    await db.execute("insert into clinical.patients (id, first_name) values ('pt_demo', 'Ben')")
+
+    row = await db.fetchrow("select origin, clinician_email from clinical.patients "
+                            "where id = 'pt_demo'")
+    assert row["origin"] == "demo"
+    assert row["clinician_email"] is None

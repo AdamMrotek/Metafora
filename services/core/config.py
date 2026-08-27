@@ -63,6 +63,23 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 #: asyncpg prepares statements, and transaction mode breaks them.
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
+#: The Supabase project, e.g. `https://xonnqmdzmhlchfawsquk.supabase.co`. Both
+#: halves of token verification derive from it and nothing else does, so there
+#: is one string to get wrong rather than three.
+#:
+#: Empty in dev means the clinical routes answer 503 — never an open door, and
+#: never a reason `make dev` or the patient path stops working, neither of which
+#: touches a credential. Outside dev it is required, exactly as DATABASE_URL is.
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+
+#: The `iss` a Supabase-signed token must carry.
+JWT_ISSUER = f"{SUPABASE_URL}/auth/v1" if SUPABASE_URL else ""
+
+#: The project's public signing keys. Asymmetric by default on a new project;
+#: one created on the legacy shared secret is switched in Settings → JWT Keys
+#: before any of this verifies anything.
+JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else ""
+
 #: The frontend stops sharing an origin once it deploys separately, so its
 #: origin has to be named rather than implied by a Vite proxy.
 ALLOWED_ORIGINS = [
@@ -119,6 +136,11 @@ def _problems() -> list[str]:
         found.append(
             "DATABASE_URL is empty — the deployment would write its only record "
             "to a container filesystem that the next release deletes"
+        )
+    if not SUPABASE_URL:
+        found.append(
+            "SUPABASE_URL is empty — every clinical read route would answer 503, "
+            "so the dashboard would be locked out of a deployment that is otherwise up"
         )
     if LIVEKIT_PUBLIC_URL.startswith("ws://"):
         found.append(
