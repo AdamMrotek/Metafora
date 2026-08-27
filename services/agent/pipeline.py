@@ -5,14 +5,19 @@ chunking, synthesise-ahead playback, SSE parsing and WAV handling. All of that
 is framework default now. What is left here is the ordering — and the ordering
 is the architecture:
 
-    transport.input  →  stt  →  SAFETY GATE  →  user context  →  llm
-                                                                   ↓
-    transport.output  ←  tts (trimmed, Orpheus-capped)  ←──────────┘
+    transport.input  →  vad  →  stt  →  SAFETY GATE  →  turn  →  user context  →  llm
+                                                                                     ↓
+    transport.output  ←──  tts (trimmed, Orpheus-capped)  ←──────────────────────────┘
 
 The transcript passes through our code before it reaches the model, so the gate
 cannot be bypassed. Everything the assistant says leaves from the same process,
 so the session log is a first-hand record rather than a reconstruction of
 whatever the browser chose to relay.
+
+`vad` and `turn` sit above the split for the same reason the gate does: there is
+one patient, so there is one turn. Below the split each branch would decide the
+turn for itself, and two branches deciding separately is two answers to a
+question that has one.
 """
 
 from dataclasses import dataclass
@@ -28,10 +33,13 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.groq.stt import GroqSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
+from pipecat.turns.user_turn_processor import UserTurnProcessor
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 from services.agent.capture import SilentBranch
 from services.agent.config import tuning
@@ -49,14 +57,15 @@ from shared.contracts.models import ProtocolVersion, QueuedInterview
 
 
 def endpointing_vad() -> SileroVADAnalyzer:
-    """Speech detection. Note that this no longer decides when a turn *ends*.
+    """Speech detection, for the single `VADProcessor` above the split.
 
-    In Pipecat 1.7 the user-turn *stop* decision belongs to the turn strategy —
+    Note that this no longer decides when a turn *ends*. In Pipecat 1.7 the
+    user-turn *stop* decision belongs to the turn strategy —
     `LocalSmartTurnAnalyzerV3` by default — not to `stop_secs`. The VAD still
     detects speech onset and drives barge-in, so `start_secs` and `confidence`
     are live; `stop_secs` is kept at our stated 0.7 s so that VAD-derived
     silence timing matches the number `tuning.py` argues for, and so the
-    measurement in `endpointing.py` compares like with like.
+    measurement in `observer.py` compares like with like.
 
     We are deliberately running the framework's semantic turn detection rather
     than our own floor, and measuring the difference on real calls before
@@ -69,6 +78,23 @@ def endpointing_vad() -> SileroVADAnalyzer:
             stop_secs=tuning.ENDPOINT_SILENCE_MS / 1000,
         )
     )
+
+
+def told_the_turn() -> LLMUserAggregatorParams:
+    """User-aggregator params for a branch that is *told* when the turn ended.
+
+    Left to its defaults an aggregator decides the turn itself, which means a
+    `SileroVADAnalyzer` and a `LocalSmartTurnAnalyzerV3` per aggregator — and we
+    have two. `ExternalUserTurnStrategies` makes it wait to be told instead: it
+    detects nothing, emits no `UserStartedSpeakingFrame`, and raises no
+    interruption. `UserTurnProcessor` upstream does all three, once.
+
+    A fresh instance per aggregator, because a strategy holds the state of the
+    turn its own context is accumulating and the two contexts flush
+    independently. It is the *decision* that must not be duplicated, and that
+    now happens above the split.
+    """
+    return LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies())
 
 
 @dataclass
@@ -170,8 +196,7 @@ def build_bot(
         messages=[{"role": "system", "content": system_prompt(protocol, interview)}]
     )
     speech_user, speech_assistant = LLMContextAggregatorPair(
-        speech_context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=endpointing_vad()),
+        speech_context, user_params=told_the_turn()
     )
 
     capture_context = LLMContext(
@@ -179,17 +204,41 @@ def build_bot(
         tools=tools,
     )
     capture_user, capture_assistant = LLMContextAggregatorPair(
-        capture_context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=endpointing_vad()),
+        capture_context, user_params=told_the_turn()
     )
+
+    # ── one turn, decided once, above the split ──
+    #
+    # `TransportParams` carries no VAD in 1.7, so speech detection and turn
+    # detection are processors now. Placed inside the aggregators — where the
+    # defaults put them — this is two `SileroVADAnalyzer`s and two
+    # `LocalSmartTurnAnalyzerV3`s: two ONNX sessions scoring every frame of the
+    # patient's audio, reaching two end-of-turn verdicts that nothing
+    # reconciles, and broadcasting two `InterruptionFrame`s per barge-in. The
+    # turn belongs to the patient, not to whichever branch noticed it.
+    #
+    # `UserTurnProcessor` keeps Pipecat's defaults — VAD and transcription for
+    # the start, `LocalSmartTurnAnalyzerV3` for the stop — so the behaviour is
+    # the one `tuning.py` describes and `EndpointDecision` is measuring. What
+    # changes is that there is now one of it.
+    vad = VADProcessor(vad_analyzer=endpointing_vad())
+    turn = UserTurnProcessor()
 
     pipeline = Pipeline(
         [
             transport.input(),
+            # Nothing between the microphone and the VAD: barge-in is the one
+            # decision the patient pays for in real time.
+            vad,
             stt,
             # Before either context, before either model. This is the ordering
             # the whole in-the-media-path argument buys.
             SafetyGate(protocol, writer, on_blocked=on_blocked),
+            # After the gate, so a blocked transcript never ends a turn and so
+            # never reaches a model. `broadcast_frame` pushes the turn frames
+            # downstream into the `ParallelPipeline`, which forks them to both
+            # branches — that is how one decision reaches two contexts.
+            turn,
             ParallelPipeline(
                 # Heard. Streams the first sentence while the other branch is
                 # still deciding what to record. Note the assistant aggregator

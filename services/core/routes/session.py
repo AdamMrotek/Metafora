@@ -1,8 +1,8 @@
 """The patient's routes. No credential passes through this file.
 
 Everything about the *call* lives in `services/core/lifecycle.py`; what is left
-here is the HTTP: refuse, resolve, record, hand back a token. Both refusals
-happen before a session record exists, so a turned-away caller leaves no row, no
+here is the HTTP: refuse, resolve, record, hand back a token. Every refusal
+happens before a session record exists, so a turned-away caller leaves no row, no
 room and no log file behind.
 """
 
@@ -16,12 +16,15 @@ from services.agent.config.protocol import PROTOCOLS
 from services.agent.session_log import ErrorEvent
 from services.core import lifecycle
 from services.core.config import (
+    ACCEPTING_SESSIONS,
+    FLY_MACHINE_ID,
     LIVEKIT_PUBLIC_URL,
     MAX_CONCURRENT_SESSIONS,
+    MAX_SESSIONS_PER_DAY,
     RATE_LIMIT_BURST,
     RATE_LIMIT_WINDOW_S,
 )
-from services.core.limits import RateLimiter
+from services.core.limits import DailyQuota, RateLimiter
 from services.core.queue import resolve_interview
 from services.core.store import create_session, get_session, live_sessions
 from shared.contracts.wire import SessionBootstrap
@@ -36,6 +39,7 @@ TYPED_USER_ID = "patient-typed"
 BUSY_MESSAGE = "All lines are busy at the moment. Please try again in a few minutes."
 
 _starts = RateLimiter(burst=RATE_LIMIT_BURST, window_s=RATE_LIMIT_WINDOW_S)
+_today = DailyQuota(limit=MAX_SESSIONS_PER_DAY)
 
 router = APIRouter(tags=["patient"])
 
@@ -57,6 +61,14 @@ async def start_session(request: Request):
     are `lifecycle.start_call`, because their ordering is a property of the call
     rather than of this route.
     """
+    # Four refusals, cheapest first, and every one of them lands before a
+    # session record, a room or a log file exists. They all say the same
+    # sentence: a caller who is turned away learns nothing about which limit
+    # they hit, which is what stops the refusals from being a map of how to
+    # get past them.
+    if not ACCEPTING_SESSIONS:
+        raise HTTPException(503, BUSY_MESSAGE, headers={"Retry-After": "3600"})
+
     caller = request.client.host if request.client else "unknown"
     if not _starts.allow(caller):
         raise HTTPException(
@@ -64,6 +76,13 @@ async def start_session(request: Request):
             BUSY_MESSAGE,
             headers={"Retry-After": str(_starts.retry_after(caller))},
         )
+
+    # Per-IP is defeated by having more addresses; this is not. Without it the
+    # caps still permit three calls back to back for as long as anyone cares to
+    # run them, which on a link anyone can share is an open-ended bill.
+    if not _today.allow():
+        logger.warning(f"[session] refused {caller}: daily quota of {_today.limit} spent")
+        raise HTTPException(503, BUSY_MESSAGE, headers={"Retry-After": "3600"})
 
     # Silero and SmartTurn run in-process on every 32 ms frame of every call, so
     # capacity is a physical property of the box. Refusing the next caller keeps
@@ -98,6 +117,9 @@ async def start_session(request: Request):
         "session": SessionBootstrap(
             session_id=session.id,
             room_name=session.room_name,
+            # Where this call lives. `/typed` has to come back here, because
+            # the session is a dict entry in *this* process.
+            machine_id=FLY_MACHINE_ID or None,
             clinician=protocol.clinician,
             patient_first_name=interview.patient.first_name,
             fields=session.machine.fields(),

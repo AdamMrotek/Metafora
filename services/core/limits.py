@@ -1,19 +1,30 @@
-"""Per-IP rate limiting for session starts.
+"""What stands between an unauthenticated route and an unbounded bill.
 
 `POST /session` is unauthenticated and each hit starts an LLM + TTS session, so
-the cheapest possible abuse is a loop. One process holds every call, so the
-limiter is in-process too — a shared store would be a second dependency bought
-to defend a box that can only hold three calls anyway.
+the cheapest possible abuse is a loop. Two limiters here, defending different
+things:
 
-A token bucket rather than a fixed window: a patient who reloads twice because
-the first attempt looked stuck should not be told to come back in five minutes,
-and a loop still converges on the refill rate.
+`RateLimiter` is per-IP and defends against *one* caller looping. A token bucket
+rather than a fixed window: a patient who reloads twice because the first attempt
+looked stuck should not be told to come back in five minutes, and a loop still
+converges on the refill rate.
 
-`now` is injected so the tests can move time without sleeping.
+`DailyQuota` is global and defends against the thing the per-IP limiter cannot
+touch — many callers, or one caller with many addresses. Per-IP plus concurrency
+still permits three calls back to back forever, which on a public link is a bill
+nobody chose.
+
+Both are in-process. One process holds every call, so a shared store would be a
+second dependency bought to defend a box that can only hold three calls anyway.
+The cost is that a restart forgets the day's count, which is why the account-level
+spend limit at the provider is the real ceiling and this is the polite one.
+
+`now` is injected into both so the tests can move time without sleeping.
 """
 
 import time
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 
 
 class RateLimiter:
@@ -70,3 +81,48 @@ class RateLimiter:
             for key, state in self._buckets.items()
             if self._level(key, now) < self.burst
         }
+
+
+class DailyQuota:
+    """Sessions per UTC day, across every caller.
+
+    Deliberately not a rolling window: "200 a day, reset at midnight" is a
+    sentence an operator can hold in their head and reason about a bill from.
+    A rolling window is more elegant and less explicable.
+
+    UTC rather than local time so the reset does not move twice a year.
+    """
+
+    def __init__(
+        self,
+        limit: int,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        #: Sessions permitted per day. `0` means no ceiling at all.
+        self.limit = max(0, limit)
+        self._now = now
+        self._day: date | None = None
+        self._used = 0
+
+    def _roll(self, today: date) -> None:
+        if self._day != today:
+            self._day = today
+            self._used = 0
+
+    def allow(self) -> bool:
+        """Spend one of today's sessions if any remain."""
+        if self.limit == 0:
+            return True
+        self._roll(self._now().date())
+        if self._used >= self.limit:
+            return False
+        self._used += 1
+        return True
+
+    def used(self) -> int:
+        """How many of today's sessions are spent. For `/health`, not for a
+        decision — a caller learns nothing about which limit turned them away."""
+        if self.limit == 0:
+            return 0
+        self._roll(self._now().date())
+        return self._used

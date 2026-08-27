@@ -97,6 +97,17 @@ function Opening({
         {connecting ? 'Connecting…' : 'Start the conversation'}
       </button>
       {error && <p className="pp__error">{error}</p>}
+      {/*
+        Below the button on purpose. Rule ② is that the answer control is the
+        largest thing on the page, and putting this above it would make the
+        first thing a patient reads a disclaimer. But it has to be here and it
+        has to be a sentence: this is a public demonstration, nobody is on the
+        other end of it, and someone will otherwise tell it something true.
+      */}
+      <p className="pp__demo">
+        This is a demonstration on made-up data. Please don’t enter real personal or medical
+        details — nobody is monitoring this conversation.
+      </p>
     </div>
   );
 }

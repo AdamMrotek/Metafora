@@ -201,14 +201,22 @@ export function useCall() {
   const sendTyped = useCallback(
     async (text: string) => {
       const id = state.session?.sessionId;
+      const machineId = state.session?.machineId;
       if (!id || !text.trim()) return;
       await fetch(`/api/session/${id}/typed`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // The session lives in one backend process's memory, so this has to
+          // come back to the machine that started the call. Absent in dev and
+          // wherever there is only one, which is why it is spread rather than
+          // set: an empty header is not the same as no header.
+          ...(machineId ? { 'fly-force-instance-id': machineId } : {}),
+        },
         body: JSON.stringify({ text }),
       });
     },
-    [state.session?.sessionId],
+    [state.session?.sessionId, state.session?.machineId],
   );
 
   return { ...state, start, sendTyped };

@@ -23,6 +23,11 @@ class SessionBootstrap(CamelModel):
 
     session_id: str
     room_name: str
+    #: Which backend machine holds this call, when there is more than one place
+    #: it could be. The session lives in that process's memory, so the browser
+    #: returns this on `/session/{id}/typed` to be routed back to it. `None`
+    #: off Fly, and `None` is the whole of dev.
+    machine_id: str | None = None
     clinician: Clinician
     patient_first_name: str
     fields: list[FieldState]

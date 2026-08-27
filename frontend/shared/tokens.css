@@ -303,6 +303,15 @@ body { margin: 0; }
 }
 .speak[disabled] { opacity: .55; cursor: progress; }
 
+/* The demo notice. Quieter and smaller than the invitation above the button,
+   because it is a caveat and not an instruction — but not a footnote either:
+   it is the thing standing between a public URL and someone's real symptoms. */
+.pp__start p.pp__demo {
+  max-width: 40ch;
+  color: var(--fg-4, var(--fg-3));
+  font-size: var(--t-sm);
+}
+
 /* The typed fallback, which the spec offers as "or type instead". */
 .typed { display: flex; gap: var(--s-2); width: 100%; max-width: 34rem; }
 .typed input {

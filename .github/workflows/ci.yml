@@ -7,6 +7,10 @@ on:
   push:
     branches: [main, 'refactor/**']
   pull_request:
+  # deploy.yml gates on this. A deploy that skips the check is a deploy of
+  # something nobody checked, and reusing the job is the only way to be sure
+  # the two never drift.
+  workflow_call:
 
 concurrency:
   group: check-${{ github.ref }}

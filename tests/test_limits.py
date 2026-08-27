@@ -1,9 +1,11 @@
-"""The per-IP token bucket in front of `POST /session`.
+"""The two limiters in front of `POST /session`.
 
-Time is injected, so none of this sleeps.
+Time is injected into both, so none of this sleeps.
 """
 
-from services.core.limits import RateLimiter
+from datetime import UTC, datetime, timedelta
+
+from services.core.limits import DailyQuota, RateLimiter
 
 
 class Clock:
@@ -95,3 +97,58 @@ def test_refilled_callers_are_forgotten():
     clock.advance(10.0)
     limiter.allow("one-more")
     assert len(limiter._buckets) < 2000
+
+
+# ─── the daily quota ─────────────────────────────────────────────────────────
+
+
+class Calendar:
+    """A clock the quota can be walked through days with."""
+
+    def __init__(self, at: datetime | None = None) -> None:
+        self.t = at or datetime(2026, 8, 25, 9, 0, tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        return self.t
+
+    def advance(self, **kwargs) -> None:
+        self.t += timedelta(**kwargs)
+
+
+def _quota(limit=3):
+    calendar = Calendar()
+    return DailyQuota(limit=limit, now=calendar), calendar
+
+
+def test_the_day_is_spendable_and_then_it_is_not():
+    quota, _ = _quota(limit=3)
+    assert [quota.allow() for _ in range(3)] == [True, True, True]
+    assert quota.allow() is False
+    assert quota.used() == 3
+
+
+def test_the_count_does_not_move_when_the_hour_does():
+    """The per-IP limiter refills continuously; this one deliberately does not.
+    "200 a day" is a sentence an operator can reason about a bill from, and a
+    rolling window is not.
+    """
+    quota, calendar = _quota(limit=1)
+    assert quota.allow() is True
+    calendar.advance(hours=14)
+    assert quota.allow() is False
+
+
+def test_midnight_utc_resets_it():
+    quota, calendar = _quota(limit=1)
+    assert quota.allow() is True
+    assert quota.allow() is False
+    calendar.advance(days=1)
+    assert quota.allow() is True
+
+
+def test_a_limit_of_zero_is_no_ceiling_at_all():
+    """`MAX_SESSIONS_PER_DAY=0` is how a developer turns this off, and it must
+    not read as "zero sessions permitted"."""
+    quota, _ = _quota(limit=0)
+    assert all(quota.allow() for _ in range(1000))
+    assert quota.used() == 0

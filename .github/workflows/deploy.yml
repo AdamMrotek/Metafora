@@ -1,0 +1,74 @@
+# Deploy, then prove it, then undo it if the proof fails.
+#
+# `check` (ci.yml) is the gate on the way in — this workflow needs it green
+# before it touches anything. What it adds is the half CI cannot do: a deployed
+# process, a real Groq call, and a way back.
+#
+# The rollback captures the running image *before* deploying rather than using
+# `flyctl releases rollback`, which keeps this independent of flyctl's version
+# and of whether Fly considers a bluegreen deploy a "release".
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Never two deploys at once: blue/green with two greens is not blue/green.
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  FLY_APP: metafora
+  BASE_URL: https://metafora.fly.dev
+
+jobs:
+  # The same gate as a pull request. A deploy that skips it is a deploy of
+  # something nobody checked.
+  check:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Where to go back to. Read before anything changes, because after the
+      # deploy this answer is the broken one.
+      - name: Remember what is running
+        id: previous
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          image=$(flyctl status --app "$FLY_APP" --json | jq -r '.ImageRef // empty')
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "current image: ${image:-<none, first deploy>}"
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --app "$FLY_APP" --remote-only
+
+      # The assertions a green health check cannot make: that the process found
+      # its Supabase project, that a call can actually start, and that the
+      # clinical routes are still shut.
+      - name: Smoke
+        id: smoke
+        run: scripts/smoke.sh "$BASE_URL"
+
+      - name: Roll back
+        if: failure() && steps.smoke.outcome == 'failure' && steps.previous.outputs.image != ''
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          echo "smoke failed — restoring ${{ steps.previous.outputs.image }}"
+          flyctl deploy --app "$FLY_APP" --image "${{ steps.previous.outputs.image }}"
+          scripts/smoke.sh "$BASE_URL"
+          echo "rolled back" >&2
+          exit 1
