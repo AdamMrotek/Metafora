@@ -3,6 +3,7 @@
 .git
 .github
 .env
+.env.prod
 .venv
 .uv-cache
 .pytest_cache

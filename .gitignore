@@ -3,6 +3,7 @@ dist/
 logs/*.jsonl
 .env
 .env.local
+.env.prod
 *.tsbuildinfo
 .DS_Store
 
