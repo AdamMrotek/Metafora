@@ -84,10 +84,13 @@ path runs with no network and no project. `test_reads.py` and `test_persistence.
 ## Conventions
 
 Conventional commits (`feat:`, `refactor:`, `docs:`). ruff only — no mypy, no black; `make typecheck`
-is TypeScript only, Python is unchecked. Two egresses, both named: Groq for STT/LLM/TTS and
-Supabase for the record (Postgres) and the signing keys (`/auth/v1/.well-known/jwks.json`).
+is TypeScript only, Python is unchecked. Three egresses, all named: Groq for STT/LLM/TTS,
+Supabase for the record (Postgres) and the signing keys (`/auth/v1/.well-known/jwks.json`), and
+Sentry for failures — which carries no part of the product by construction, because `app.py`
+gives it no request bodies and drops anything raised inside `services/agent/`.
 `GROQ_API_KEY` is the one env var `make dev` requires; `DATABASE_URL` and `SUPABASE_URL` are both
-optional in dev and required outside it — empty `DATABASE_URL` means JSONL on disk and an
+optional in dev and required outside it (`Dockerfile` + `fly.toml` deploy the backend, and
+`config.py` names every secret it refuses to boot without) — empty `DATABASE_URL` means JSONL on disk and an
 in-process store, empty `SUPABASE_URL` means the clinical routes refuse everyone with 503, which
 is a refusal and never an open door. `scripts/auth.sh` signs in and calls a clinical route, which
 is the dashboard's contract before the dashboard exists. `.env.example` has the rest, all dev

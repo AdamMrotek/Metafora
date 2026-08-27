@@ -1,0 +1,66 @@
+# The backend, and only the backend.
+#
+# Two properties of this app decide almost everything below: the process holds
+# live WebRTC connections and its sessions in memory (so it cannot scale to
+# zero, cannot be replaced by a rolling restart, and cannot be load-balanced
+# across machines without pinning), and Silero + SmartTurn run in-process on
+# every 32 ms frame of every call (so capacity is a physical property of the
+# box, not a number we choose).
+
+app            = "metafora"
+primary_region = "lhr"   # the Supabase project is eu-west-2; keep the pool short
+
+# The goodbye *is* the drain. `lifespan` calls `lifecycle.drain()`, which tells
+# every live call to say goodbye and gives each one GOODBYE_TIMEOUT_S = 10s to
+# finish the sentence. So a patient mid-call on a deploy hears the assistant
+# sign off rather than silence — but they do not get to finish the interview.
+# 30s is that 10s plus room for the pool and the pipeline to close.
+#
+# Do not raise this to MAX_CALL_SECONDS hoping calls will run to completion:
+# `drain()` hangs them up, it does not wait for them. If we ever want the other
+# behaviour it is a change in lifecycle.py, and this number follows it.
+kill_signal  = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+
+[deploy]
+  # Never rolling: a rolling restart on a single machine is a hard cut in the
+  # middle of every call in progress. Blue/green brings the replacement up and
+  # health-checks it before the old one is asked to leave. Requires the check
+  # defined below — without it, blue/green has nothing to wait for.
+  strategy = "bluegreen"
+
+[env]
+  METAFORA_ENV = "prod"
+  PORT         = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https   = true
+
+  # No scale-to-zero. A cold start here is Python importing numba, llvmlite and
+  # onnxruntime — seconds of spinner in front of someone who followed a link,
+  # which is the entire failure mode of a demo.
+  auto_stop_machines   = false
+  auto_start_machines  = false
+  min_machines_running = 1
+
+  # One machine, so `/session/{id}/typed` reaches the process that holds the
+  # session by construction. Raising this is not a capacity knob on its own:
+  # the browser is handed FLY_MACHINE_ID and returns it as
+  # `fly-force-instance-id`, and that path has never been exercised with two.
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 25
+    hard_limit = 50
+
+  [[http_service.checks]]
+    path     = "/health"
+    interval = "15s"
+    timeout  = "3s"
+    grace_period = "30s"
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "1gb"   # 512 MB will not hold onnxruntime + Silero + SmartTurn

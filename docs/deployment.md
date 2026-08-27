@@ -4,8 +4,9 @@
 code blocks that today, and what the target is for a **portfolio deployment** — a public,
 clickable demo on synthetic data, not a clinical deployment on real patients.
 
-**Status:** draft · plan, not yet executed. Nothing here is built. If a decision below changes,
-change it here rather than in a commit message.
+**Status:** 2026-08-25 · built. `Dockerfile`, `fly.toml`, `frontend/call/vercel.json`,
+`scripts/smoke.sh` and `.github/workflows/deploy.yml` are the executable form of this page. If a
+decision below changes, change it here rather than in a commit message.
 
 Read [`system-map.md`](./system-map.md) first for what the pieces are. This page only covers
 where they run.
@@ -32,11 +33,13 @@ guessed. Assume 2–4 on a 1–2 vCPU box until someone loads it.
 
 ### Weight
 
-No torch. The heavy dependencies are `onnxruntime` (66 MB), `llvmlite`/`numba`, and `scipy`;
-the venv is ~511 MB, so a ~700–800 MB image. The SmartTurn v3 model is an 8.7 MB ONNX file
+No torch. Measured in the built image on 2026-08-25: the venv is **766 MB** and the image is
+**1.26 GB** — `llvmlite` 169 MB, `scipy` 118 MB, `sympy` 74 MB, `onnxruntime` 46 MB, `numpy`
+40 MB, `numba` 35 MB. The earlier ~700–800 MB estimate was the macOS venv; linux wheels plus
+`UV_COMPILE_BYTECODE=1` (which buys the fast boot below) account for the difference. The SmartTurn v3 model is an 8.7 MB ONNX file
 **bundled in the pipecat wheel** — there is no runtime download and no cold-start model fetch.
 Import of numba/llvmlite/scipy/onnxruntime still costs seconds, which is why the backend stays
-warm (§3).
+warm (§3) — measured cold-start to a 200 on `/health` is **4 s**.
 
 ---
 
@@ -124,10 +127,28 @@ under `make test-pg`.
 
 ## 5 · Deploy mechanic
 
-A restart drops every live call, so **blue/green, not rolling**: bring up the new backend, stop
-routing new `POST /session` to the old one, let it drain, kill it after a grace period at least
-as long as the longest interview. Do not let a platform's default 30-second SIGKILL near this —
-a patient mid-sentence is the failure mode. Depends on blocker 5 being real.
+A restart drops every live call, so **blue/green, not rolling**: bring up the new backend,
+health-check it, then let the old one go.
+
+**The goodbye is the drain, and the grace period is 30 seconds — not fifteen minutes.** An
+earlier draft of this section said to wait out the longest possible interview. That describes
+behaviour the code does not have: `lifespan` calls `lifecycle.drain()`, which calls `teardown()`
+on every live session *immediately*. `teardown` queues the goodbye and waits `GOODBYE_TIMEOUT_S`
+= 10 s for the pipeline to finish saying it. So a deploy ends every call in progress; what it
+does not do is end them in silence, which is what blocker 5 was about and is the difference that
+was worth having. `fly.toml` sets `kill_timeout = "30s"` — that 10 s, plus room for the pool and
+the pipeline to close.
+
+Raising `kill_timeout` toward `MAX_CALL_SECONDS` would achieve nothing on its own. Letting calls
+run to their natural end is a change in `lifecycle.py` (stop accepting, wait, hang up only on
+timeout), and this number would follow it rather than lead it.
+
+**Affinity.** §1 is right that `/session/{id}/typed` must reach the process holding the session.
+Phase 3 runs exactly one machine, so that holds by construction. It does not hold the moment
+there are two — and the measurement in §1 may well ask for two. So `POST /session` returns
+`FLY_MACHINE_ID` on the bootstrap and `useCall.ts` returns it as `fly-force-instance-id`. Unused
+today, tested today, so that scaling is `fly scale count` and not an afternoon of intermittent
+404s that read as a bug in the pipeline.
 
 ---
 

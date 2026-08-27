@@ -19,6 +19,8 @@ where they run.
   `clinical.results`. Append-only triggers under test (`make test-pg`).
 - **Persistence — Phase 1, below.** A call now survives the process that ran it.
 - **Auth — Phase 2, below.** The record is readable by a named clinician and by nobody else.
+- **Deploy — Phase 3, below.** The image, the machine, the caps and the way back are built; the
+  accounts they run on are not yet created.
 
 ---
 
@@ -137,23 +139,67 @@ Neither is a code change, and neither blocks `make check`.
 
 ---
 
-## 3 · Deploy — **next**
+## 3 · Deploy — **built, not yet run**
 
 *Why now:* one deploy of something durable rather than two of something that evaporates — the
 first public URL already keeps what it records and already refuses an anonymous reader. Both of
 those are now true rather than planned.
 
-- `Dockerfile` (uv, `--frozen`) + `fly.toml`: 1 vCPU / 1 GB, `min_machines_running = 1`, no volume.
-- LiveKit Cloud → `LIVEKIT_PUBLIC_URL`.
-- Fly secrets: `DATABASE_URL`, `SUPABASE_URL`, `METAFORA_ENV=prod`. No JWT secret — that is
-  what choosing JWKS bought, and `config.py` refuses to import without the two that remain.
-- `frontend/call` → Vercel or Cloudflare Pages, `/api/*` rewritten to the Fly host.
-- Sentry or Logfire in `lifespan`, every `ErrorEvent` reported. `/health` as the Fly check.
-- Blue/green, never rolling. Grace period longer than the longest interview.
-- CI deploy job + post-deploy smoke test.
-- Label the public URL as a demo on the opening screen.
+The bullet list this section used to carry did not survive contact with the code: it named three
+Fly secrets where `config.py` refuses to boot without six, and it promised a drain the code does
+not implement. [`roadmap-review.md`](./roadmap-review.md) is the audit; this is what was built.
 
-**Done:** a stranger completes an interview on their phone; the row survives a redeploy.
+**The box.** `Dockerfile` (uv, `--frozen`, two stages, non-root) + `fly.toml`: 1 vCPU / 1 GB,
+`min_machines_running = 1`, no auto-stop, no volume, `lhr` because Supabase is eu-west-2.
+Measured: a 1.26 GB image that boots to a 200 on `/health` in 4 s. LiveKit Cloud supplies the
+SFU; `deployment.md` §2 is why that is a deliberate trade and not an oversight.
+
+**Every secret, because the old list was wrong.** `DATABASE_URL` · `SUPABASE_URL` ·
+`METAFORA_ENV=prod` · `GROQ_API_KEY` · `LIVEKIT_API_KEY` · `LIVEKIT_API_SECRET` · `LIVEKIT_URL` ·
+`LIVEKIT_PUBLIC_URL` · `SENTRY_DSN`. Still no JWT secret — that is what choosing JWKS bought.
+`ALLOWED_ORIGINS` is not among them because the Vercel rewrite keeps one origin.
+
+**Spend, which nothing bounded before.** Per-IP is defeated by having more addresses, and per-IP
+plus concurrency still permits three calls back to back forever. So: a spend limit on the Groq
+account (the only control a bug in our code cannot bypass), `MAX_SESSIONS_PER_DAY`
+(`limits.DailyQuota`, in-process, UTC), and `ACCEPTING_SESSIONS` — an off switch that is a
+`fly secrets set` rather than a redeploy, because a redeploy is the thing you cannot do calmly at
+the moment you need it. Four refusals now, all before a session record exists, all saying the
+same sentence.
+
+**Shutdown, described honestly.** The goodbye *is* the drain. `drain()` hangs every live call up
+and gives each 10 s to finish the sentence; `kill_timeout = "30s"`. The old "grace period longer
+than the longest interview" would have changed nothing — waiting for calls to end naturally is a
+`lifecycle.py` change, not a `fly.toml` one. Blue/green, never rolling.
+
+**Affinity, built before it is needed.** `POST /session` returns `FLY_MACHINE_ID`; `useCall.ts`
+returns it as `fly-force-instance-id` on `/typed`. Dead weight on one machine — and the thing
+that stops the second machine from being an afternoon of intermittent 404s that read as a bug in
+the pipeline.
+
+**Failures.** Sentry in `lifespan`, a **third egress**, named in `CLAUDE.md` the way Supabase was
+when it arrived. `max_request_body_size="never"` because `/session/{id}/typed` carries what the
+patient typed, and `before_send` drops anything raised inside `services/agent/`, whose stack
+frames hold transcripts. Invariant 3 arriving through the back door is the failure being
+prevented.
+
+**The portal.** `frontend/call` → Vercel, `/api/*` rewritten to the Fly host, so `useCall.ts`
+keeps its relative fetches and CORS never applies. The opening screen gains a sentence doing real
+work — *made-up data, don't enter real details, nobody is monitoring this* — rather than a badge
+in a corner.
+
+**Proof and a way back.** `scripts/smoke.sh` asserts what a green health check cannot: that the
+process found its Supabase project (`auth: true`), that a call genuinely starts (Groq, LiveKit
+and Postgres in one request, then ended), and that `GET /interviews` is still 401. It runs after
+every deploy in `.github/workflows/deploy.yml`, which captures the running image first and
+restores it when the smoke test fails.
+
+**Still to do, and it needs the accounts:** the Groq spend limit, the LiveKit/Fly/Sentry projects,
+the first `fly deploy`, and the measurement below.
+
+**Done:** a stranger completes an interview on their phone · three at once hold their latency,
+and `MAX_CONCURRENT_SESSIONS` is set from what that showed rather than guessed · the row survives
+a redeploy · a rollback has been performed once on purpose.
 
 ---
 
@@ -191,11 +237,25 @@ deploy → intake → return → review → sign — closes here.
   the call starts**, then it is spent.
 - `POST /session` takes the token → validate → `claim()` → run.
 - Expired, spent or unknown link → a sentence on screen, not a status code.
+- **The tokenless demo path survives**, behind `ALLOW_DEMO_SESSIONS` (default on). "Replaces"
+  above means *for a dispatched patient*: read literally it would delete the public demo, which
+  is the whole of Phase 3's Done criterion and most of what this project is for. A token takes
+  the dispatch path, no token still mints an ephemeral synthetic patient, and both end at the
+  same `claim()` — which is already true.
 
 **The rest of the loop.**
 
-- Escalations: `urgent_escalate` writes `clinical.escalations`, the band subscribes over Supabase
-  Realtime. Only a human clears it.
+- Escalations: `urgent_escalate` writes `clinical.escalations`; the band subscribes to an SSE
+  stream held open from `svc-core` (`GET /escalations/stream`, behind `ClinicalReader`, scoped by
+  the same `where` clause as the read routes). Only a human clears it.
+
+  **Not Supabase Realtime**, which was the earlier plan and is the cheaper thing to write. It
+  fails two ways. It is a person reading clinical data on a path that never reaches `svc-core`,
+  so the only enforcement left is RLS — the mechanism `system-map.md` rule 1 rejects and §6+
+  defers precisely so the trade is made deliberately rather than discovered at Phase 5. And it
+  converts a swappable dependency into a sticky one: `DATABASE_URL` moves the record to any
+  Postgres, Realtime does not move at all. The backend is already long-lived and session-affine
+  (`deployment.md` §1), so an SSE endpoint on it costs less than the RLS policies would.
 - Sign-off: `clinical.signatures`, append-only `(prev_hash, record_hash, hash)` chain, one
   irreversible Sign pinned to the head.
 - Fourth outcome state: an interview that **completed and is also an escalation**. Give
@@ -210,11 +270,14 @@ deploy → intake → return → review → sign — closes here.
 *Why not sooner:* none of it is on the MVP line, and each needs something the earlier phases build.
 Independent of each other; reorder freely.
 
+- **Mid-call resilience — first of these, and arguably before Phase 5's sign-off chain.**
+  Reconnect, attach-and-resume, Groq outage fallback. A link that survives past the start of the
+  call belongs here. Promoted out of the unordered pile because a stranger on mobile data losing
+  the call at question 7 is the most likely way Phase 3's own Done criterion fails in front of
+  someone we are trying to impress — and the hash chain is more work and demonstrates less.
 - **Agent studio** — form, red flags, authored test pairs, no runner.
 - **Post-call queue** — summarisation and structured extraction after a call. pgmq.
 - **Audio retention** — Supabase Storage + a deletion schedule.
-- **Mid-call resilience** — reconnect, attach-and-resume, Groq outage fallback. A link that
-  survives past the start of the call belongs here.
 - **`store-metrics`** — closed set of typed fields, nothing medical.
 - **Attribute-based access control** — rules over relationships (clinician ↔ patient ↔ practice)
   instead of roles. Wanted by the first of these to arrive: a second practice on one deployment,

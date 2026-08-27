@@ -108,6 +108,40 @@ MAX_CALL_SECONDS = int(os.environ.get("MAX_CALL_SECONDS", "900"))
 RATE_LIMIT_BURST = int(os.environ.get("RATE_LIMIT_BURST", "3"))
 RATE_LIMIT_WINDOW_S = float(os.environ.get("RATE_LIMIT_WINDOW_S", "300"))
 
+#: Sessions started in one day, across every caller. The per-IP limiter above
+#: is defeated by having more IPs; this is not. It is the difference between a
+#: public link costing a known amount and costing whatever someone decides.
+#: `0` disables it.
+MAX_SESSIONS_PER_DAY = int(os.environ.get("MAX_SESSIONS_PER_DAY", "200"))
+
+#: The off switch. `false` makes `POST /session` refuse everyone, so closing a
+#: public demo is a secret change rather than a redeploy — which matters because
+#: a redeploy is the thing you cannot do calmly at the moment you need this.
+ACCEPTING_SESSIONS = os.environ.get("ACCEPTING_SESSIONS", "true").strip().lower() not in (
+    "false",
+    "0",
+    "no",
+)
+
+
+# ─── Deployment ──────────────────────────────────────────────────────────────
+
+#: Error reporting. A *third* egress — see the Conventions note in CLAUDE.md —
+#: and the only one that exists to carry failures rather than the product, which
+#: is why `app.py` initialises it to send no request bodies and nothing from
+#: `services/agent`. Empty means no Sentry, which is what a laptop gets.
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+
+#: Set by Fly on every machine. This process holds its sessions in memory, so
+#: `/session/{id}/typed` has to come back to *this* machine; the browser is
+#: handed this string and returns it as `fly-force-instance-id`.
+#:
+#: Phase 3 runs one machine, so nothing depends on it yet. It is here so that
+#: scaling to two is a `fly scale count` and not a debugging session: without
+#: it, the second machine makes `/typed` 404 intermittently and it reads as a
+#: bug in the pipeline. Empty everywhere that is not Fly, and empty is fine.
+FLY_MACHINE_ID = os.environ.get("FLY_MACHINE_ID", "")
+
 
 # ─── Verification ────────────────────────────────────────────────────────────
 

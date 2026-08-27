@@ -13,6 +13,7 @@ dependencies = [
     "asyncpg>=0.31.0",
     "pyjwt[crypto]>=2.10",
     "httpx>=0.28",
+    "sentry-sdk[fastapi]>=2.20",
 ]
 
 [dependency-groups]

@@ -1,0 +1,24 @@
+# Everything that is not the backend. The portal builds on Vercel, the session
+# logs are a laptop artefact, and .env must never be baked into an image.
+.git
+.github
+.env
+.venv
+.uv-cache
+.pytest_cache
+.ruff_cache
+__pycache__
+**/__pycache__
+node_modules
+**/node_modules
+frontend
+shared/contracts/src
+logs
+docs
+tests
+supabase
+scripts
+Makefile
+package.json
+package-lock.json
+*.md

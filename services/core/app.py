@@ -21,6 +21,7 @@ from loguru import logger
 from services.core import db
 from services.core.config import (
     ALLOWED_ORIGINS,
+    ENV,
     GROQ_API_KEY,
     JWKS_URL,
     JWT_ISSUER,
@@ -28,6 +29,7 @@ from services.core.config import (
     LIVEKIT_URL,
     MAX_CONCURRENT_SESSIONS,
     PORT,
+    SENTRY_DSN,
     SUPABASE_URL,
 )
 from services.core.lifecycle import drain
@@ -38,6 +40,7 @@ from shared import auth
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _configure_sentry()
     if not GROQ_API_KEY:
         logger.warning("GROQ_API_KEY is not set — calls will fail at the first turn")
     # The record before the first caller: `clinical.interviews` references
@@ -55,6 +58,60 @@ async def lifespan(app: FastAPI):
     await drain("server_shutdown")
     auth.configure(None)
     await db.close()
+
+
+def _configure_sentry() -> None:
+    """Report failures, and nothing else.
+
+    A third egress — `CLAUDE.md` names it — and the only one that carries no
+    part of the product. Everything here exists to keep it that way, because
+    the default posture of an error reporter is to attach whatever context it
+    can find, and on this application that context is a patient talking about
+    their health.
+
+    Two settings do the work:
+
+    - `max_request_body_size="never"`. `POST /session/{id}/typed` carries what
+      the patient typed. A 500 or a pydantic validation error on that route
+      would otherwise send the body to a third party, which is the failure
+      invariant 3 exists to prevent, arriving through the back door.
+    - `before_send=_drop_agent_events`. `services/agent/` is the conversation —
+      the pipeline, the transcript, the gate. Nothing that happens in there is
+      reportable, so nothing from in there is reported.
+
+    Empty DSN means no Sentry, which is a laptop, and is not a warning.
+    """
+    if not SENTRY_DSN:
+        return
+
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=ENV,
+        send_default_pii=False,
+        max_request_body_size="never",
+        before_send=_drop_agent_events,
+    )
+    logger.info(f"sentry · reporting {ENV} failures from services/core only")
+
+
+def _drop_agent_events(event: dict, _hint: dict) -> dict | None:
+    """Return `None` for anything raised inside `services/agent/`.
+
+    Belt and braces alongside `max_request_body_size`: a stack frame carries
+    local variables, and a local variable in the pipeline is a transcript.
+    Checking the frames rather than the culprit string because the culprit is
+    the *outermost* frame, and an agent exception surfacing through a core
+    route would be attributed to the route.
+    """
+    for exception in (event.get("exception") or {}).get("values") or []:
+        for frame in (exception.get("stacktrace") or {}).get("frames") or []:
+            if str(frame.get("module") or "").startswith("services.agent"):
+                return None
+            if "services/agent/" in str(frame.get("abs_path") or ""):
+                return None
+    return event
 
 
 async def _configure_auth() -> None:

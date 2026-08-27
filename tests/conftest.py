@@ -1,12 +1,13 @@
 """Shared fixtures.
 
-Five jobs. Keep session logs out of the repo's own `logs/` directory — a test
+Six jobs. Keep session logs out of the repo's own `logs/` directory — a test
 that creates a session would otherwise leave a real JSONL file behind — reset
 the module-level state that `services/core` deliberately holds in-process, so
 tests cannot leak sessions, tasks or spent rate-limit tokens into each other,
-clear the authenticator `shared/auth` holds in another one, and hold the pure
+clear the authenticator `shared/auth` holds in another one, hold the pure
 suite's "no key, no LiveKit, no database" property against a developer `.env`
-that names a real project.
+that names a real project, and stand in for the bot on behalf of the two suites
+that drive a real call — `test_session_routes.py` and `test_lifecycle.py`.
 
 That last one is `no_database`, and it is not a formality. `config.py` reads
 `.env` at import and this repo's own `.env` has a populated `DATABASE_URL`, so
@@ -96,6 +97,17 @@ async def fresh_state():
     lifecycle._watchdogs.clear()
     session_routes._starts._buckets.clear()
     store._sessions.clear()
+
+
+
+@pytest.fixture
+def bots(monkeypatch):
+    """Both halves of the call live in `lifecycle` — the bot it builds and the
+    runner it drives — so one module is still the whole substitution."""
+    from services.core import lifecycle
+    from tests import fakes
+
+    return fakes.install(monkeypatch, lifecycle)
 
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / "supabase" / "migrations"

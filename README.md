@@ -9,7 +9,8 @@ only place documentation lives.
 |---|---|
 | [`docs/system-map.md`](./docs/system-map.md) | The pieces, how they talk to each other, and the rules that keep that shape. |
 | [`docs/roadmap.md`](./docs/roadmap.md) | The order the rest of the work happens in, and which phase deployment, testing, auth and persistence land in. |
-| [`docs/deployment.md`](./docs/deployment.md) | Where the pieces run, and what in the code blocks a deploy today. |
+| [`docs/deployment.md`](./docs/deployment.md) | Where the pieces run, and what in the code once blocked a deploy. |
+| [`docs/roadmap-review.md`](./docs/roadmap-review.md) | A critical read of the roadmap against the code, and what came of it. |
 | [`docs/agent-review-and-pipecat-decision.md`](./docs/agent-review-and-pipecat-decision.md) | The review that chose Pipecat and the Python backend. |
 | [`docs/ux/`](./docs/ux) | The frozen design specs, one per app. |
 
