@@ -55,12 +55,24 @@ kill_timeout = "30s"
     soft_limit = 25
     hard_limit = 50
 
-  [[http_service.checks]]
-    path     = "/health"
-    interval = "15s"
-    timeout  = "3s"
-    grace_period = "30s"
 
 [[vm]]
   size   = "shared-cpu-1x"
   memory = "1gb"   # 512 MB will not hold onnxruntime + Silero + SmartTurn
+
+# A *machine* check, not an `[[http_service.checks]]` one, and the difference is
+# the whole reason blue/green works. A service check is run by the proxy for
+# machines already in the pool; a green machine is not in the pool yet, so the
+# check ran, answered 200 every 15s, and reported its result nowhere flyctl
+# could see it — which flyctl spells `unchecked` and then, five minutes later,
+# "could not get all green machines to be healthy". A named check here is run by
+# the machine and lands in the machine record, which is what blue/green polls.
+[checks]
+  [checks.health]
+    type         = "http"
+    port         = 3000
+    path         = "/health"
+    method       = "get"
+    interval     = "15s"
+    timeout      = "3s"
+    grace_period = "30s"
