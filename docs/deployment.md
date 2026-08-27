@@ -4,9 +4,10 @@
 code blocks that today, and what the target is for a **portfolio deployment** — a public,
 clickable demo on synthetic data, not a clinical deployment on real patients.
 
-**Status:** 2026-08-25 · built. `Dockerfile`, `fly.toml`, `frontend/call/vercel.json`,
-`scripts/smoke.sh` and `.github/workflows/deploy.yml` are the executable form of this page. If a
-decision below changes, change it here rather than in a commit message.
+**Status:** 2026-08-27 · **deployed**, and proven by a real call (§3). `Dockerfile`,
+`fly.toml`, `frontend/call/vercel.json`, `scripts/smoke.sh` and
+`.github/workflows/deploy.yml` are the executable form of this page. If a decision below
+changes, change it here rather than in a commit message.
 
 Read [`system-map.md`](./system-map.md) first for what the pieces are. This page only covers
 where they run.
@@ -58,23 +59,49 @@ if this ever carries a real patient, §2 is the paragraph to revisit first.
 
 ---
 
-## 3 · Target stack (portfolio)
+## 3 · The stack, as deployed
 
 | Piece | Where | Cost |
 |---|---|---|
-| `frontend/call` | Cloudflare Pages or Vercel — static Vite build | free |
+| `frontend/call` | Vercel — `metafora-call`, static Vite build, Root Directory `frontend/call` | free |
 | LiveKit | LiveKit Cloud, free tier | free |
-| backend (FastAPI + Pipecat) | Fly.io — 1 machine, 1 vCPU / 1 GB, **always-on** | ~$5/mo |
+| backend (FastAPI + Pipecat) | Fly.io — `metafora`, one `shared-cpu-1x` / 1 GB machine in `lhr`, **always-on** | ~$6/mo |
+
+Live since 2026-08-27: **https://metafora-call.vercel.app** in front of
+**https://metafora.fly.dev**. The first call through it completed and persisted — two turns, both
+scanned before generation, both passes firing, two fields captured into `clinical.results`. That
+sentence is the whole of §6's argument, so it is worth recording that it is now a fact rather
+than a plan.
 
 **1 GB minimum, and no scale-to-zero.** A 512 MB tier will not hold onnxruntime + Silero +
 SmartTurn. `min_machines_running = 1`: a cold link that shows a spinner while Python imports
 numba is the whole failure mode of a portfolio deploy.
 
-**Origins.** Splitting the frontend onto Pages costs us the same-origin arrangement dev has.
-`frontend/call/src/call/useCall.ts:123` fetches a *relative* `/api/session`; there is no API
-base URL in the frontend at all. Two options: add a `VITE_API_BASE`, or point the Pages
-rewrite at the Fly host and keep one origin. **Prefer the rewrite** — no frontend code change,
-no CORS, and `ALLOWED_ORIGINS` stops mattering.
+**Origins — the rewrite won.** `useCall.ts` fetches a *relative* `/api/session`; there is no API
+base URL in the frontend at all. `frontend/call/vercel.json` sends `/api/:path*` to
+`https://metafora.fly.dev/:path*`, so the browser only ever sees one origin: no `VITE_API_BASE`,
+no CORS, and `ALLOWED_ORIGINS` never has to be right.
+
+The SFU address is not build config either. `POST /session` returns `LIVEKIT_PUBLIC_URL` in its
+bootstrap (`services/core/routes/session.py:116`) and the browser connects to whatever it is
+handed — so changing SFU is a Fly secret, not a rebuild. The frontend holds exactly one piece of
+configuration, and it is the rewrite destination.
+
+**The Vercel setting that is not optional.** Root Directory is `frontend/call`, and *include
+files outside the root directory* must stay **on**. `@metafora/call` depends on the
+`@metafora/contracts` and `@metafora/ui` workspaces at the repo root, and `vercel.json` installs
+with `cd ../.. && npm ci`. Restrict the build to the root directory and those two packages stop
+resolving — the same class of failure as the health check in §5: the app is fine, the platform
+was not given what it needs to see.
+
+**Cost has no ceiling at the platform, and that is not fixable.** Fly bills usage only — no fixed
+plan, no budget, no billing alerts, and prepaid credits are explicitly *not* a cap: *"Credits are
+not a way to control spend"*, the remainder goes to the card on file. What actually holds the Fly
+line is the shape of `fly.toml` — one machine, `auto_start_machines` and `auto_stop_machines` both
+false, no autoscaling path at all — so ~$6/mo cannot drift. The variable cost is Groq, and
+`services/core/limits.py` already names where the real ceiling lives: its `DailyQuota` is
+in-process, so a restart forgets the day's count and a deploy *is* a restart. Set the spend limit
+at the provider and treat `MAX_SESSIONS_PER_DAY` as the polite brake the module calls itself.
 
 ---
 
@@ -150,6 +177,28 @@ there are two — and the measurement in §1 may well ask for two. So `POST /ses
 today, tested today, so that scaling is `fly scale count` and not an afternoon of intermittent
 404s that read as a bug in the pipeline.
 
+That one machine is not the default, and Fly will argue with you about it. The first deploy —
+`rolling`, because there was nothing to be blue or green against yet — created **two** machines
+on its own, announcing *"Creating a second machine for high availability and zero downtime
+deployments"*. For an app whose sessions are a dict in one process, the second machine is not
+availability, it is a coin flip on every `/typed`. `fly scale count 1` undid it. Blue/green does
+not reintroduce the problem, because it replaces one machine with one machine — but a deploy that
+falls back to `rolling` will, so read the plan line before confirming.
+
+**Blue/green needs a *machine* check, not a service check — and this cost a deploy to learn.**
+The first CI deploy failed after five minutes with `could not get all green machines to be
+healthy`, having deleted a green machine that had been answering `/health` with `200` every 15
+seconds the entire time. `[[http_service.checks]]` are run by the proxy for machines already in
+the service pool; a green machine is not in the pool yet, so the check ran and reported its result
+nowhere flyctl could see it — which flyctl spells `unchecked`, then kills. `fly.toml` now defines
+a named `[checks.health]` instead: run by the machine, written into the machine record, which is
+what blue/green actually polls. `--wait-timeout` is a red herring — it already waited its full
+five-minute default, and the status was never going to arrive.
+
+The general shape is worth keeping, because it recurs: **the app being healthy and the platform
+being able to see that it is healthy are two different things**, and every deployment failure on
+this page so far has been the second one.
+
 ---
 
 ## 6 · Supabase — Postgres yes, queue no
@@ -204,3 +253,9 @@ roadmap points at them rather than restating them.
 
 The order itself is now: **blockers → Postgres → auth → deploy → dashboard → sign-off**, with
 the post-call queue after the MVP, pointed at work that genuinely needs a queue.
+
+As of 2026-08-27, everything up to and including **deploy** is done. Two things were deliberately
+left undone rather than forgotten: `SENTRY_DSN` is unset, so a failure in production is visible
+only in `flyctl logs`, and the Groq-side spend limit that §3 argues is the real ceiling is not yet
+set. The dashboard is next, and it is the first consumer of `reads.py` — which is to say the first
+time the auth work has anything to be authorised *for*.
