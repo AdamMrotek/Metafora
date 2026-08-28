@@ -5,10 +5,10 @@ import type { PublicConfig } from '@metafora/contracts';
  * The Supabase client, created from what the backend hands down.
  *
  * There is no `VITE_SUPABASE_URL` in this app and there deliberately is not
- * one: `GET /config` carries the project and the anon key, so this bundle holds
- * exactly one piece of configuration — where `/api` goes, which is a Vercel
- * rewrite and not code. Rotating the anon key is then `fly secrets set` rather
- * than a rebuild of a static site.
+ * one: `GET /config` carries the project and the publishable key, so this
+ * bundle holds exactly one piece of configuration — where `/api` goes, which
+ * is a Vercel rewrite and not code. Rotating the publishable key is then
+ * `fly secrets set` rather than a rebuild of a static site.
  *
  * Which is why the client cannot be a module constant: it does not exist until
  * a fetch has come back. `main.tsx` boots through `loadConfig` before rendering
@@ -31,7 +31,7 @@ export async function loadConfig(): Promise<PublicConfig> {
 }
 
 export function initSupabase(config: PublicConfig): SupabaseClient {
-  client = createClient(config.supabaseUrl, config.supabaseAnonKey, {
+  client = createClient(config.supabaseUrl, config.supabasePublishableKey, {
     auth: {
       // The two settings this dependency was chosen for. A hand-rolled client
       // signs in fine and then 401s an hour later, which is the bug you find

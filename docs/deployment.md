@@ -76,7 +76,7 @@ than a plan.
 
 **The clinician portal is built and not yet up.** Phase 4 runs against the deployed backend from
 a laptop, which is how it was developed and is not the same as being deployed. Three things, in
-this order: `fly secrets set SUPABASE_ANON_KEY` (before the deploy that adds `/config`, or the
+this order: `fly secrets set SUPABASE_PUBLISHABLE_KEY` (before the deploy that adds `/config`, or the
 route answers 503 to a dashboard that is otherwise fine), the second Vercel project, and a
 sign-in against `metafora.fly.dev` from the Vercel URL rather than through the Vite proxy — which
 is the first time the rewrite, and not the proxy, is what carries `/api`.
@@ -96,13 +96,13 @@ handed — so changing SFU is a Fly secret, not a rebuild. Each frontend holds e
 configuration, and it is the rewrite destination.
 
 That claim survived the dashboard, which is the surface most likely to have broken it: it has to
-reach Supabase Auth directly, so it needs the project URL and the anon key in the browser. Those
+reach Supabase Auth directly, so it needs the project URL and the publishable key in the browser. Those
 arrive from **`GET /config`** — unauthenticated, because it is the thing you read *in order to*
 authenticate — rather than from `VITE_` variables baked into the bundle. Same argument as the SFU
-address: rotating the anon key is `fly secrets set` and not a rebuild of a static site, and the
+address: rotating the publishable key is `fly secrets set` and not a rebuild of a static site, and the
 two Vercel projects have no environment variables at all.
 
-`SUPABASE_ANON_KEY` is deliberately **not** in `config.py`'s `_problems()`. Everything that list
+`SUPABASE_PUBLISHABLE_KEY` is deliberately **not** in `config.py`'s `_problems()`. Everything that list
 refuses to boot on would fail a patient; a missing dashboard key only fails a clinician's
 sign-in, and crash-looping the box over it would take the patient demo down to fix the other
 half. `/config` answers 503 with a sentence the dashboard renders instead.

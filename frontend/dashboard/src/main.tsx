@@ -43,7 +43,7 @@ function Boot() {
           <p className="signin__err">{failed}</p>
           <p>
             The backend is reachable but has no Supabase project configured, so there is nobody it
-            could sign in. Set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> on the
+            could sign in. Set <code>SUPABASE_URL</code> and <code>SUPABASE_PUBLISHABLE_KEY</code> on the
             deployment.
           </p>
         </div>

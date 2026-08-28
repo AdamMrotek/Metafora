@@ -214,9 +214,9 @@ against the deployed authenticated backend rather than a local stand-in, which i
 **Four small things on the backend, and no new authorisation anywhere.**
 
 - **`GET /config`** — unauthenticated, beside `/health`, because it is a fact about the process
-  and has no audience. It hands the browser `supabaseUrl` and `supabaseAnonKey`, which is what
+  and has no audience. It hands the browser `supabaseUrl` and `supabasePublishableKey`, which is what
   keeps `deployment.md` §3's *"one piece of configuration"* true of the dashboard too: rotating
-  the anon key is a secret change, not a rebuild of a static site. `SUPABASE_ANON_KEY` is
+  the publishable key is a secret change, not a rebuild of a static site. `SUPABASE_PUBLISHABLE_KEY` is
   deliberately **not** in `config.py`'s `_problems()` — everything on that list would fail a
   *patient*, and crash-looping the box over a clinician's sign-in key would take the demo down
   to fix the other half. The route answers 503 with a sentence instead.
@@ -275,7 +275,7 @@ is not offering it yet, and the shape of the act is the argument the composer is
 
 **Deploy — the one part not yet run.** A second Vercel project, `metafora-dashboard`, Root
 Directory `frontend/dashboard`, same include-files-outside-the-root setting, and
-`fly secrets set SUPABASE_ANON_KEY` before the deploy that adds `/config`. Until then the
+`fly secrets set SUPABASE_PUBLISHABLE_KEY` before the deploy that adds `/config`. Until then the
 dashboard runs from a laptop against the deployed backend, which is how it was built and is not
 the same thing.
 

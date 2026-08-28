@@ -20,8 +20,8 @@ Always `uv run <cmd>`, never bare `python`/`pytest`.
 ## Map
 
 **`services/core/`** — HTTP + state. `app.py` is the *application* — lifespan, CORS, error body,
-`/health`, and `/config`, which hands a browser the Supabase project and anon key so neither
-frontend bakes one in — and the routes live in `routes/`, split by audience: `session.py` is the
+`/health`, and `/config`, which hands a browser the Supabase project and publishable key so
+neither frontend bakes one in — and the routes live in `routes/`, split by audience: `session.py` is the
 patient's and holds no credential, `interviews.py` + `patients.py` + `me.py` are the clinician's
 and every route is behind `require_role`. `lifecycle.py` is the call itself (join, speak, teardown, drain), shared by the
 session router and `lifespan`. `store.py` live session handles here, the durable record in
@@ -100,16 +100,16 @@ is everything the dashboard *writes* — dispatch, escalations, the signature le
 Conventional commits (`feat:`, `refactor:`, `docs:`). ruff only — no mypy, no black; `make typecheck`
 is TypeScript only, Python is unchecked. Three egresses, all named: Groq for STT/LLM/TTS,
 Supabase for the record (Postgres), the signing keys (`/auth/v1/.well-known/jwks.json`) and the
-clinician's sign-in — which the dashboard's *browser* makes directly, with the anon key `/config`
-hands it, so it is the same egress and not a fourth — and
+clinician's sign-in — which the dashboard's *browser* makes directly, with the publishable key
+`/config` hands it, so it is the same egress and not a fourth — and
 Sentry for failures — which carries no part of the product by construction, because `app.py`
 gives it no request bodies and drops anything raised inside `services/agent/`.
 `GROQ_API_KEY` is the one env var `make dev` requires; `DATABASE_URL` and `SUPABASE_URL` are both
 optional in dev and required outside it (`Dockerfile` + `fly.toml` deploy the backend, and
 `config.py` names every secret it refuses to boot without) — empty `DATABASE_URL` means JSONL on disk and an
 in-process store, empty `SUPABASE_URL` means the clinical routes refuse everyone with 503, which
-is a refusal and never an open door. `SUPABASE_ANON_KEY` is in neither list: it is read only by
-`/config`, and empty means the dashboard is told so rather than the box refusing to boot — a
+is a refusal and never an open door. `SUPABASE_PUBLISHABLE_KEY` is in neither list: it is read
+only by `/config`, and empty means the dashboard is told so rather than the box refusing to boot — a
 clinician's sign-in key must not be able to take the patient path down. `scripts/auth.sh` is the
 same contract from a shell, and it was written before the dashboard was. `.env.example` has the
 rest, all dev defaults.

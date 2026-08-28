@@ -12,7 +12,7 @@
 #   scripts/auth.sh /patients              # any clinical route
 #   scripts/auth.sh /interviews/iv_abc123
 #
-# Reads SUPABASE_URL and SUPABASE_ANON_KEY from .env, and the credentials from
+# Reads SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from .env, and the credentials from
 # the environment or a prompt. The password is never written to .env: it belongs
 # to a person, not to the deployment.
 
@@ -33,7 +33,7 @@ if [ -f .env ]; then
 fi
 
 : "${SUPABASE_URL:?set SUPABASE_URL in .env — the project this signs in against}"
-: "${SUPABASE_ANON_KEY:?set SUPABASE_ANON_KEY in .env — the public key the sign-in endpoint requires}"
+: "${SUPABASE_PUBLISHABLE_KEY:?set SUPABASE_PUBLISHABLE_KEY in .env — the publishable key (sb_publishable_…) the sign-in endpoint requires}"
 
 if [ -z "${METAFORA_EMAIL:-}" ]; then
   read -rp "email: " METAFORA_EMAIL
@@ -46,7 +46,7 @@ fi
 echo "→ signing in to ${SUPABASE_URL} as ${METAFORA_EMAIL}"
 TOKEN=$(
   curl -sS -X POST "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
-    -H "apikey: ${SUPABASE_ANON_KEY}" \
+    -H "apikey: ${SUPABASE_PUBLISHABLE_KEY}" \
     -H "Content-Type: application/json" \
     -d "$(jq -nc --arg e "$METAFORA_EMAIL" --arg p "$METAFORA_PASSWORD" \
           '{email: $e, password: $p}')" \

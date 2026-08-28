@@ -201,16 +201,16 @@ export interface Account {
  *
  * Handed down rather than baked into a bundle, which is the same argument
  * `POST /session` already makes for `LIVEKIT_PUBLIC_URL`: the frontend holds
- * one piece of configuration (where to send `/api`), and rotating the anon key
+ * one piece of configuration (where to send `/api`), and rotating the publishable key
  * is a secret change rather than a rebuild of two static sites.
  *
- * Both values are public by construction — the anon key is published to every
+ * Both values are public by construction — the publishable key is published to every
  * browser that signs in, and `config.accounts` is what decides who has a
  * caseload.
  */
 export interface PublicConfig {
   supabaseUrl: string;
-  supabaseAnonKey: string;
+  supabasePublishableKey: string;
 }
 
 /**

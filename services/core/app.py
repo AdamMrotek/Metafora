@@ -30,7 +30,7 @@ from services.core.config import (
     MAX_CONCURRENT_SESSIONS,
     PORT,
     SENTRY_DSN,
-    SUPABASE_ANON_KEY,
+    SUPABASE_PUBLISHABLE_KEY,
     SUPABASE_URL,
 )
 from services.core.lifecycle import drain
@@ -208,8 +208,8 @@ async def public_config() -> PublicConfig:
 
     Unauthenticated, because it is the thing you read *in order to* authenticate,
     and it carries nothing that is not already public: the project URL is in
-    every token's `iss` and the anon key is published to every browser that
-    signs in. What decides who has a caseload is `config.accounts`, which is
+    every token's `iss` and the publishable key is published to every browser
+    that signs in. What decides who has a caseload is `config.accounts`, which is
     seeded by a migration and is not reachable from here.
 
     It lives beside `/health` rather than in a router because it has no
@@ -221,9 +221,11 @@ async def public_config() -> PublicConfig:
     dashboard key is not one of those — crash-looping the box over it would take
     the patient demo down to fix a clinician's sign-in.
     """
-    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    if not SUPABASE_URL or not SUPABASE_PUBLISHABLE_KEY:
         raise HTTPException(503, "this server has no sign-in configured")
-    return PublicConfig(supabase_url=SUPABASE_URL, supabase_anon_key=SUPABASE_ANON_KEY)
+    return PublicConfig(
+        supabase_url=SUPABASE_URL, supabase_publishable_key=SUPABASE_PUBLISHABLE_KEY
+    )
 
 
 def main() -> None:
