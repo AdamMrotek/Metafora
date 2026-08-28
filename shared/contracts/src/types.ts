@@ -134,6 +134,12 @@ export interface InterviewSummary {
   patientOrigin: PatientOrigin;
   protocolId: string;
   protocolLabel: string;
+  /** How much of the script the call actually got through, counted from */
+  /** `clinical.results`. On the row rather than behind a second request */
+  /** because the review table draws a progress meter per line, and one */
+  /** lateral join is cheaper than a detail fetch per row. */
+  capturedFields: number;
+  totalFields: number;
   scheduledFor: string | null;
   startedAt: string | null;
   endedAt: string | null;
@@ -174,6 +180,37 @@ export interface InterviewDetail {
   interview: InterviewSummary;
   results: ResultField[];
   events: TranscriptEvent[];
+}
+
+/**
+ * The caller, as `config.accounts` has them — what `GET /me` returns.
+ *
+ * The dashboard greets a person by name and shows what their role admits, and
+ * both facts live in a table only the server can read. Without this the
+ * greeting is an email address and the UI guesses at the role, which is the
+ * kind of guess that becomes a client-side authorisation check.
+ */
+export interface Account {
+  email: string;
+  role: string;
+  displayName: string;
+}
+
+/**
+ * What a browser needs before it can sign anybody in — `GET /config`.
+ *
+ * Handed down rather than baked into a bundle, which is the same argument
+ * `POST /session` already makes for `LIVEKIT_PUBLIC_URL`: the frontend holds
+ * one piece of configuration (where to send `/api`), and rotating the anon key
+ * is a secret change rather than a rebuild of two static sites.
+ *
+ * Both values are public by construction — the anon key is published to every
+ * browser that signs in, and `config.accounts` is what decides who has a
+ * caseload.
+ */
+export interface PublicConfig {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
 }
 
 /**

@@ -2,8 +2,8 @@
 
 What is left here once the routes are `test_session_routes.py`'s and the call
 is `test_lifecycle.py`'s: the Sentry `before_send` filter, which is the only
-thing in `app.py` that is neither wiring nor a route. It needs no client and no
-fakes — it is a function over an event dict.
+thing in `app.py` that is neither wiring nor a route, and `/config`, which is
+the only route in it — both belong to the process rather than to an audience.
 
 Invariant 3 says nothing medical goes to telemetry. The back door into that is
 a stack frame from the pipeline, whose locals are a transcript, so the filter
@@ -11,6 +11,9 @@ is load-bearing and both of its directions are held: what it must drop, and
 what it must not.
 """
 
+import httpx
+
+from services.core import app as app_module
 from services.core.app import _drop_agent_events
 
 
@@ -61,3 +64,59 @@ def test_an_event_with_no_stack_survives():
     silently discard most of what is worth seeing."""
     event = {"message": "pool exhausted"}
     assert _drop_agent_events(event, {}) is event
+
+
+# ─── `/config` ───────────────────────────────────────────────────────────────
+
+
+async def get_config() -> httpx.Response:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app_module.app), base_url="http://testserver"
+    ) as http:
+        return await http.get("/config")
+
+
+async def test_the_browser_is_handed_the_project_and_the_anon_key(monkeypatch):
+    """The dashboard holds one piece of configuration — where `/api` goes — and
+    reads the rest from here, so rotating the anon key is a secret change and
+    not a rebuild of a static site."""
+    monkeypatch.setattr(app_module, "SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setattr(app_module, "SUPABASE_ANON_KEY", "anon-key-abc")
+
+    response = await get_config()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "supabaseUrl": "https://project.supabase.co",
+        "supabaseAnonKey": "anon-key-abc",
+    }
+
+
+async def test_it_needs_no_credential(monkeypatch):
+    """It is the thing you read in order to authenticate, so requiring
+    authentication for it would be a loop with no way in."""
+    monkeypatch.setattr(app_module, "SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setattr(app_module, "SUPABASE_ANON_KEY", "anon-key-abc")
+
+    assert (await get_config()).status_code == 200
+
+
+async def test_an_unconfigured_server_refuses_with_a_sentence(monkeypatch):
+    """`make dev` on a laptop with no project. A 503 the dashboard can render,
+    rather than an empty string it would try to sign in against."""
+    monkeypatch.setattr(app_module, "SUPABASE_URL", "")
+    monkeypatch.setattr(app_module, "SUPABASE_ANON_KEY", "")
+
+    response = await get_config()
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "this server has no sign-in configured"
+
+
+async def test_half_configured_is_also_a_refusal(monkeypatch):
+    """A project with no anon key cannot sign anyone in, and handing the browser
+    an empty key would fail later and further away."""
+    monkeypatch.setattr(app_module, "SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setattr(app_module, "SUPABASE_ANON_KEY", "")
+
+    assert (await get_config()).status_code == 503

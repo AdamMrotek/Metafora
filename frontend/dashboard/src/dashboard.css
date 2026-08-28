@@ -1,0 +1,486 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   THE CLINICIAN PORTAL · components, on top of `@metafora/ui/tokens.css`
+   Lifted from `docs/ux/clinical-dashboard.html`, which is a frozen spec. Every
+   rule down to the APP SHELL banner is that file verbatim, in its own order,
+   with only the documentation page's own chrome left behind (`.mast`,
+   `.specimen`, `.eyebrow`, `.caption`, the essay's five-act diagram) and the
+   token blocks omitted because `tokens.css` already carries them.
+   Moved rather than reinterpreted: a screenshot of this beside the patient
+   portal has to read as one product, and the way to guarantee that is to not
+   re-pick anything.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The rail's dot, and the only animation on the screen. */
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.72)}}
+
+/* ─── the app, rendered ─────────────────────────────────────────────────── */
+.app{min-width:860px; max-width:100%; background:var(--bg); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; font-size:var(--t-sm)}
+.chrome{display:flex; align-items:center; gap:var(--s-6); padding:var(--s-4) var(--s-5); border-bottom:1px solid var(--line); background:var(--surface)}
+.wordmark{font-weight:700; letter-spacing:-.03em; font-size:var(--t-base)}
+.chrome nav{display:flex; gap:var(--s-5); color:var(--fg-4); font-size:var(--t-xs)}
+.chrome nav b{color:var(--fg); font-weight:500}
+.grow{flex:1}
+.kbd{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); border:1px solid var(--line); border-radius:var(--r-xs); padding:2px 7px}
+
+/* tier 1 · in-app rail, same gradient as the page band */
+.rail{background:var(--danger-grad); color:#fff; display:flex; align-items:center; gap:var(--s-4); padding:var(--s-3) var(--s-5)}
+.rail__dot{width:7px;height:7px;border-radius:var(--r-full);background:#fff;flex:none;animation:pulse 2.4s var(--ease) infinite}
+@media (prefers-reduced-motion:reduce){.rail__dot{animation:none}}
+.rail__txt{flex:1;min-width:0}
+.rail__t{font-weight:600;font-size:var(--t-sm)}
+.rail__s{font-size:var(--t-xs);opacity:.87;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail__c{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:var(--t-sm);background:rgba(255,255,255,.2);padding:2px 8px;border-radius:var(--r-xs);flex:none}
+.rail__b{background:#fff;color:var(--r-700);border:0;font:inherit;font-weight:600;font-size:var(--t-2xs);padding:6px 12px;border-radius:var(--r-xs);cursor:pointer;flex:none}
+
+/* The rail and the chrome run edge to edge; everything else is inset. That
+   gap is the whole reason the band reads as outranking the page. */
+.page{padding:var(--s-6) var(--s-8) var(--s-8); display:flex; flex-direction:column; gap:var(--s-6)}
+.greet{padding-top:var(--s-2)}
+.greet b{display:block; color:var(--fg); font-size:var(--t-xl); font-weight:600; letter-spacing:-.028em; margin-bottom:var(--s-2)}
+.greet b i{font-style:normal; color:var(--fg-4); font-weight:400; letter-spacing:-.01em}
+.greet span{color:var(--fg-4); font-size:var(--t-xs)}
+
+/* Floaty stats: no card, no border, left-aligned to the same rail as
+   everything below. The escalation count is deliberately absent: the band above
+   already carries it, with a clock. Two places for one number is two places to
+   disagree. */
+.stats{display:flex; flex-wrap:wrap; justify-content:flex-end; gap:var(--s-10); text-align:right; margin-top:calc(var(--s-2) * -1)}
+.stat{display:flex; flex-direction:column; align-items:flex-end; gap:2px}
+.stat__n{font-size:2.125rem; font-weight:600; line-height:.95; letter-spacing:-.045em; font-variant-numeric:tabular-nums}
+.stat__l{font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.09em; color:var(--fg-4); white-space:nowrap}
+.stat--muted .stat__n{color:var(--fg-4)}
+.stat__n em{font-style:normal; font-size:var(--t-sm); font-weight:500; letter-spacing:0; color:var(--fg-4); margin-left:6px}
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
+.ver{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); border:1px solid var(--line); border-radius:var(--r-xs); padding:0 5px}
+
+/* pills */
+.pill{display:inline-flex; align-items:center; gap:6px; font-size:var(--t-2xs); font-weight:500; padding:4px 10px; border-radius:var(--r-full); border:1px solid var(--line); background:var(--surface); color:var(--fg-3); white-space:nowrap}
+.pill--accent{background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent-fg)}
+.pill--danger{background:var(--danger-soft); border-color:var(--danger-line); color:var(--danger-fg)}
+.pill--warn{background:var(--warn-soft); border-color:var(--warn-line); color:var(--warn-fg)}
+.pill--done{color:var(--fg-3); background:var(--sunken)}
+.pill--faint{color:var(--fg-4); background:var(--sunken)}
+.pill__d{width:5px;height:5px;border-radius:var(--r-full);background:currentColor}
+.pill__c{font-family:var(--font-mono); font-variant-numeric:tabular-nums}
+.chk{font-size:11px}
+
+.btn-grad{background:var(--grad); color:var(--accent-on); border:0; font:inherit; font-weight:600; font-size:var(--t-sm); padding:var(--s-3) var(--s-5); border-radius:var(--r-xs); cursor:pointer; white-space:nowrap}
+
+/* ── the review table ──
+   Five columns, not seven. Capture belongs with the interview it describes, and
+   the action belongs on the status cell. Two columns that were carrying one
+   fact each were the reason this looked crowded. */
+.toolbar{display:flex; align-items:center; gap:var(--s-3); padding:var(--s-5) var(--s-5) var(--s-4); flex-wrap:wrap}
+.toolbar__t{font-size:var(--t-md); font-weight:600; letter-spacing:-.018em}
+.toolbar__c{font-size:var(--t-2xs); color:var(--fg-4); font-family:var(--font-mono)}
+.ctl{border:1px solid var(--line); border-radius:var(--r-xs); background:var(--surface); padding:5px var(--s-3); color:var(--fg-4); font-size:var(--t-xs); display:inline-flex; align-items:center; gap:var(--s-2); white-space:nowrap}
+.ctl--search{flex:1; min-width:150px; max-width:230px; background:var(--inset)}
+.ctl b{color:var(--fg-2); font-weight:500}
+.dt{width:100%; border-collapse:collapse; font-size:var(--t-sm); margin:0; table-layout:fixed}
+.dt th{text-align:left; padding:var(--s-2) var(--s-4); border-block:1px solid var(--line); font-family:var(--font-mono); font-size:var(--t-2xs); font-weight:500; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-4); white-space:nowrap; background:var(--sunken)}
+.dt th.sorted{color:var(--accent-fg)}
+.dt th:first-child,.dt td:first-child{padding-left:var(--s-5)}
+.dt th:last-child,.dt td:last-child{padding-right:var(--s-5)}
+.dt td{padding:var(--s-4); border-bottom:1px solid var(--line-soft); vertical-align:top; color:var(--fg-3); line-height:1.45}
+.dt tr:last-child td{border-bottom:0}
+.dt .who{color:var(--fg); font-weight:500}
+.dt .sub{display:block; font-weight:400; color:var(--fg-4); font-size:var(--t-2xs); margin-top:3px}
+.dt .mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums}
+.dt .out b{display:block; color:var(--fg-2); font-weight:500; margin-bottom:3px}
+.dt .out span{font-size:var(--t-xs); color:var(--fg-4)}
+/* the urgent row borrows the escalation band's own treatment */
+.tr--urgent td{background:var(--danger-soft)}
+.tr--urgent td:first-child{position:relative}
+.tr--urgent td:first-child::before{content:""; position:absolute; inset:0 auto 0 0; width:3px; background:var(--danger-grad)}
+.tr--urgent .out b{color:var(--danger-fg)}
+.status{display:flex; align-items:center; justify-content:space-between; gap:var(--s-3)}
+.meter{display:flex; align-items:center; gap:var(--s-2); font-size:var(--t-2xs); color:var(--fg-4); font-variant-numeric:tabular-nums; margin-top:6px}
+.meter__t{width:46px; height:4px; border-radius:2px; background:var(--line-strong); overflow:hidden; flex:none}
+.meter__f{display:block; height:100%; background:var(--grad-bright); border-radius:2px}
+.meter__f--low{background:var(--danger)}
+.act-link{color:var(--accent-fg); font-size:var(--t-md); line-height:1; flex:none}
+.pager{display:flex; align-items:center; justify-content:space-between; gap:var(--s-4); padding:var(--s-4) var(--s-5); border-top:1px solid var(--line); font-size:var(--t-2xs); color:var(--fg-4); font-family:var(--font-mono)}
+.pages{display:flex; gap:4px; align-items:center}
+.pg{min-width:23px; height:23px; padding:0 6px; display:grid; place-items:center; border:1px solid var(--line); border-radius:var(--r-xs); font-size:var(--t-2xs)}
+.pg--on{background:var(--grad); color:var(--accent-on); border-color:transparent; font-weight:500}
+.pg--off{color:var(--line-strong); border-color:var(--line-soft)}
+
+/* ── two-up cards below the table: what is out, and what came back ──
+   Both are glances. Two lines per item, a fixed five rows, and a way out to
+   the full list, because a card that grows without bound stops being a glance. */
+.duo{display:grid; grid-template-columns:1fr 1fr; gap:var(--s-4); align-items:start}
+.card{border:1px solid var(--line); border-radius:var(--r-sm); background:var(--surface); overflow:hidden}
+.card__h{display:flex; justify-content:space-between; gap:var(--s-3); padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line-soft); font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.09em; color:var(--fg-4)}
+.card__f{padding:var(--s-3) var(--s-4); border-top:1px solid var(--line-soft); font-size:var(--t-2xs); color:var(--accent-fg); font-weight:500}
+.item{padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line-soft)}
+.item:last-of-type{border-bottom:0}
+.item__t{display:flex; justify-content:space-between; align-items:baseline; gap:var(--s-3)}
+.item__n{font-size:var(--t-sm); font-weight:500; color:var(--fg)}
+.item__m{font-size:var(--t-2xs); color:var(--fg-4); font-family:var(--font-mono); white-space:nowrap; flex:none}
+.item__s{display:block; font-size:var(--t-xs); color:var(--fg-4); margin-top:3px; line-height:1.4}
+
+/* ── interview detail: what the queue's arrow opens ── */
+.crumb{display:flex; align-items:center; gap:var(--s-2); padding:var(--s-4) var(--s-6); border-bottom:1px solid var(--line-soft); font-size:var(--t-xs); color:var(--fg-4)}
+.crumb b{color:var(--fg); font-weight:500}
+.crumb i{font-style:normal; color:var(--line-strong)}
+.dhead{display:flex; justify-content:space-between; align-items:flex-start; gap:var(--s-6); padding:var(--s-5) var(--s-6); flex-wrap:wrap}
+.dhead__n{display:block; font-size:var(--t-lg); font-weight:600; letter-spacing:-.025em}
+.dhead__s{display:block; font-size:var(--t-xs); color:var(--fg-4); font-family:var(--font-mono); margin-top:3px}
+.chips{display:flex; gap:var(--s-2); flex-wrap:wrap; align-items:center}
+/* the history strip is now a timeline · see the .tl block below */
+.panes{display:grid; grid-template-columns:1.35fr 1fr; gap:var(--s-5); padding:0 var(--s-6) var(--s-6); align-items:start}
+.pane{border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
+.tabs{display:flex; gap:var(--s-4); padding:0 var(--s-4); border-bottom:1px solid var(--line); background:var(--sunken)}
+.tab{padding:var(--s-3) 0; font-size:var(--t-xs); color:var(--fg-4); border-bottom:2px solid transparent; margin-bottom:-1px}
+.tab--on{color:var(--accent-fg); border-bottom-color:var(--accent); font-weight:500}
+.tline{display:grid; grid-template-columns:52px 1fr; gap:var(--s-3); padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line-soft); font-size:var(--t-xs)}
+.tline:last-child{border-bottom:0}
+.tline__t{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4)}
+.tline__w{color:var(--fg-4); text-transform:uppercase; letter-spacing:.06em; font-size:var(--t-2xs); display:block; margin-bottom:2px}
+.tline__x{color:var(--fg-2)}
+.scan{display:block; margin-top:4px; font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4)}
+.scan--hit{color:var(--danger-fg)}
+.cmp{border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
+.cmp__h{padding:var(--s-3) var(--s-4); border-bottom:1px solid var(--line); background:var(--sunken); font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.09em; color:var(--fg-4)}
+.cmp__b{padding:var(--s-4); display:flex; flex-direction:column; gap:var(--s-4)}
+.fld__l{display:block; font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.08em; color:var(--fg-4); margin-bottom:5px}
+.fld__v{display:block; border:1px solid var(--line); border-radius:var(--r-xs); background:var(--inset); padding:var(--s-3); font-size:var(--t-xs); color:var(--fg-3); line-height:1.5}
+.fld__v--ro{background:var(--sunken); color:var(--fg-4)}
+.sig{border-top:1px solid var(--line); padding:var(--s-4); background:var(--sunken); display:flex; flex-direction:column; gap:var(--s-3)}
+.sig__h{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); line-height:1.6; word-break:break-all}
+.sig__r{display:flex; align-items:center; justify-content:space-between; gap:var(--s-3)}
+
+/* ── patients ── */
+.rel{font-size:var(--t-2xs); color:var(--fg-4); display:block; margin-top:3px}
+
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PATIENT EXPERIENCE · out of the card, onto the page
+   The verbatim quotes were never a glance: five people's sentences in a box
+   is a reading task sitting where a scan should be. What a clinician needs
+   from feedback at 07:40 is shape and volume: is it holding, and how many
+   said so. The words move to their own view; this keeps the pulse.
+   ══════════════════════════════════════════════════════════════════════════ */
+.px{display:flex; flex-direction:column; gap:var(--s-6); padding:var(--s-2) 0 0}
+.px__top{display:flex; align-items:flex-start; justify-content:space-between; gap:var(--s-6); flex-wrap:wrap}
+.px__t{font-size:var(--t-md); font-weight:700; letter-spacing:-.022em; margin:0}
+.px__s{font-size:var(--t-xs); color:var(--fg-4); margin:3px 0 0; max-width:52ch; line-height:1.5}
+
+/* the range control · one row, above the chart, never beside it */
+.seg{display:inline-flex; padding:3px; gap:2px; border:1px solid var(--line); border-radius:var(--r-full); background:var(--inset); flex:none}
+.seg__b{
+  font:inherit; font-size:var(--t-2xs); font-weight:500; letter-spacing:.02em;
+  border:0; background:none; color:var(--fg-4); padding:6px 14px; border-radius:var(--r-full);
+  cursor:pointer; white-space:nowrap; transition:color .18s var(--ease), background .18s var(--ease);
+}
+.seg__b:hover{color:var(--fg-2)}
+/* the control wears the sweep the columns wear: same gradient, same
+   direction, so the filter and the thing it filters read as one object.
+   It stays on --accent-on rather than a hard white: the sweep is bright in
+   dark mode, where white label on bright cyan would fail. */
+.seg__b--on{background:var(--sweep); color:var(--accent-on)}
+.seg__b--on:hover{color:var(--accent-on)}
+
+/* three spans, floaty, no boxes, same reasoning as the counts above */
+.px__stats{display:flex; flex-wrap:wrap; gap:var(--s-8) var(--s-16)}
+.pxs{display:flex; flex-direction:column; gap:2px; min-width:132px}
+.pxs__l{font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.1em; color:var(--fg-4); white-space:nowrap}
+.pxs__n{
+  font-size:2.75rem; font-weight:700; line-height:.92; letter-spacing:-.048em;
+  background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.pxs__n u{text-decoration:none; font-size:var(--t-md); font-weight:500; letter-spacing:-.01em; -webkit-text-fill-color:var(--fg-4); margin-left:4px}
+.pxs__d{font-size:var(--t-2xs); color:var(--fg-4); font-variant-numeric:tabular-nums}
+.pxs__d b{color:var(--accent-fg); font-weight:600}
+
+.px__legend{display:flex; flex-wrap:wrap; gap:var(--s-2) var(--s-5); font-size:var(--t-2xs); color:var(--fg-4)}
+.lg{display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
+.lg i{width:10px; height:10px; border-radius:3px; flex:none}
+.lg--pos i{background:var(--t-700)}
+.lg--neu i{background:var(--n-400)}
+.lg--neg i{background:var(--a-600)}
+.px__plot{position:relative; margin-top:var(--s-4)}
+.px__plot svg{display:block; width:100%; height:auto; overflow:visible}
+.px__plot .gx{fill:var(--fg-4); font-family:var(--font-mono); font-size:11px; letter-spacing:.04em}
+.px__plot .cap{fill:var(--fg-2); font-family:var(--font-mono); font-size:11.5px; font-weight:500}
+.px__plot .cap--zero{fill:var(--fg-4)}
+.px__plot .base{stroke:var(--line-strong); stroke-width:1}
+.px__plot .hit{fill:transparent; cursor:default}
+.tip{
+  position:absolute; top:0; left:0; pointer-events:none; opacity:0; transform:translate(-50%,0);
+  background:var(--n-900); color:var(--n-25); border-radius:var(--r-xs); padding:8px 10px;
+  font-size:var(--t-2xs); line-height:1.5; white-space:nowrap; z-index:5;
+  transition:opacity .12s var(--ease); box-shadow:0 6px 22px rgba(0,0,0,.22);
+}
+.tip--on{opacity:1}
+.tip b{display:block; font-family:var(--font-mono); letter-spacing:.05em; color:#fff; margin-bottom:3px}
+.tip span{display:flex; align-items:center; gap:6px; font-variant-numeric:tabular-nums}
+.tip i{width:8px; height:8px; border-radius:2px; flex:none}
+.px__vals{font-size:var(--t-2xs); color:var(--fg-4)}
+.px__vals summary{cursor:pointer; color:var(--accent-fg); font-weight:500; list-style:none}
+.px__vals summary::-webkit-details-marker{display:none}
+.px__vals summary{display:inline-flex; align-items:center; gap:6px}
+.px__vals summary::before{content:"▸"; font-size:11px; line-height:1}
+.px__vals[open] summary::before{content:"▾"}
+.px__vals table{width:100%; border-collapse:collapse; margin-top:var(--s-3); font-variant-numeric:tabular-nums}
+.px__vals th,.px__vals td{text-align:right; padding:5px var(--s-3); border-bottom:1px solid var(--line-soft); font-weight:400}
+.px__vals th:first-child,.px__vals td:first-child{text-align:left; font-family:var(--font-mono)}
+.px__vals th{color:var(--fg-3); font-weight:500}
+.px__foot{font-size:var(--t-2xs); color:var(--accent-fg); font-weight:500}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE HISTORY TIMELINE
+   It was five equal cards in a row, newest first. Two things were wrong with
+   that. A row of cards with no spine encodes no time: the gaps between a
+   patient's contacts are clinical signal, and equal cards threw that away. And
+   it ran backwards: right-to-left is not how anyone reads a chronology, so the
+   item you end on was the oldest, when the item you must end on is the one
+   waiting for your name.
+   So it runs oldest → newest, the intervals are labelled on the spine, and the
+   terminus is the interview that needs signing. A timeline that ends anywhere
+   else is just a list with a line drawn through it.
+   ══════════════════════════════════════════════════════════════════════════ */
+.tl{display:flex; overflow-x:auto; padding:var(--s-6) var(--s-6) var(--s-8)}
+.tl__i{
+  position:relative; flex:1 0 172px; min-width:172px; padding:var(--s-6) var(--s-5) 0 0;
+  display:flex; flex-direction:column; align-items:flex-start; gap:6px;
+}
+/* one spine segment per item, so it survives horizontal scrolling */
+.tl__i::before{content:""; position:absolute; top:6px; left:0; right:0; height:1px; background:var(--line-strong)}
+.tl__i:first-child::before{left:6px}
+.tl__i:last-child::before{right:auto; width:6px}
+.tl__node{
+  position:absolute; top:0; left:0; width:13px; height:13px; border-radius:var(--r-full);
+  background:var(--bg); border:2px solid var(--line-strong); box-sizing:border-box;
+}
+/* the interval rides the spine and breaks it, which is what makes the gap read
+   as a duration rather than as layout */
+.tl__gap{
+  position:absolute; top:-2px; left:50%; transform:translateX(-50%);
+  /* --bg, not --surface: the timeline sits on the app ground, and those two
+     are the same colour in light but not in dark, and --surface painted a visible
+     box behind every interval there. */
+  background:var(--bg); padding:0 6px;
+  font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); letter-spacing:.04em;
+}
+.tl__d{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); letter-spacing:.04em}
+.tl__p{font-size:var(--t-xs); color:var(--fg-2); font-weight:500; line-height:1.35}
+
+/* the terminus · the one that owes a signature.
+   It is deliberately NOT the escalation treatment: no clock, no pulse, no
+   danger gradient. Tier 1 stays exclusive to the band and the urgent pill this
+   item already carries. This is emphasis, which is a different job. */
+.tl__i--now{padding-right:0}
+.tl__i--now .tl__node{
+  width:17px; height:17px; top:-2px; border:0; background:var(--sweep);
+  box-shadow:0 0 0 4px var(--accent-soft);
+}
+.tl__i--now .tl__d{color:var(--accent-fg); font-weight:500}
+.tl__i--now .tl__p{color:var(--fg); font-weight:600}
+.tl__owed{
+  display:inline-flex; align-items:center; gap:6px; margin-top:2px;
+  font-size:var(--t-2xs); font-weight:600; letter-spacing:.02em; color:var(--accent-fg);
+}
+.tl__owed::before{content:""; width:14px; height:2px; border-radius:1px; background:var(--sweep)}
+
+@media (max-width:860px){
+  .tl__i,.tl__i--now{flex:0 0 150px}
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE REVIEW COMPOSER, PROMOTED
+   Act V is the product and this is the only surface where it happens, yet it
+   was a neutral card sitting beside the transcript, weighted exactly like it.
+   Two panes of equal weight read as "skim both"; the correct reading is "read
+   that, then commit to this." So the composer takes the accent surface.
+   It wears --grad-card specifically: the one ramp measured to carry white text
+   at every stop (4.58 / 4.73 / 4.55 : 1) and deliberately NOT re-pointed in
+   dark, so the surface a signature lands on is identical in both themes.
+   White is doing one job here and it is not decoration: a solid white box is
+   a field you can type in. The issued summary is read-only and stays
+   translucent, so "white = editable" is an affordance, not a paint choice.
+   ══════════════════════════════════════════════════════════════════════════ */
+.cmp{background:var(--grad-card); border-color:transparent; color:#fff}
+.cmp__h{background:transparent; border-bottom-color:rgba(255,255,255,.24); color:rgba(255,255,255,.85); font-weight:500}
+.cmp .fld__l{color:rgba(255,255,255,.82)}
+.cmp .fld__v{background:#fff; border-color:transparent; color:var(--n-800); box-shadow:0 1px 3px rgba(0,0,0,.16)}
+.cmp .fld__v--type{color:var(--n-400)}
+/* read-only is not a field, so it is not white */
+.cmp .fld__v--ro{background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); color:rgba(255,255,255,.9); box-shadow:none}
+.cmp .sig{background:rgba(0,0,0,.18); border-top-color:rgba(255,255,255,.22)}
+.cmp .sig__h{color:rgba(255,255,255,.62)}
+.cmp .sig__note{font-size:var(--t-2xs); color:rgba(255,255,255,.75)}
+/* a gradient button on a gradient card is invisible. The commit goes white,
+   the same move the escalation band makes with Schedule consultation. */
+.cmp .btn-grad{background:#fff; color:var(--t-800)}
+
+/* the calls card goes full width and its items go two-up */
+.duo{grid-template-columns:1fr; gap:var(--s-8)}
+.card__grid{display:grid; grid-template-columns:1fr 1fr}
+.card__grid .item:nth-child(odd){border-right:1px solid var(--line-soft)}
+.card__grid .item:nth-last-child(-n+2){border-bottom:0}
+
+/* dark: the chart's three marks re-point; the neutral midpoint does not,
+   because it is the absence of a side and a gradient would give it one. */
+.lg--pos i{background:var(--sweep)}
+.lg--neg i{background:var(--sweep-warn)}
+.lg--neu i{background:var(--px-neu)}
+
+@media (prefers-reduced-motion:reduce){
+  .seg__b,.tip{transition:none}
+}
+
+@media (max-width:860px){
+  .px__stats{gap:var(--s-6) var(--s-8)}
+  .card__grid{grid-template-columns:1fr}
+  .card__grid .item:nth-child(odd){border-right:0}
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   APP SHELL
+   In the spec these components sit inside a specimen frame on a documentation
+   page — hence `.app { min-width: 860px }`, which is a horizontal scrollbar
+   inside a figure. Here they are the whole window, so the frame comes off.
+   Below that: the states a static mockup has none of. A screen that is loading,
+   a table with nothing in it yet, a control that is not wired to anything until
+   Phase 5, and a sign-in. All of them are drawn in the spec's own vocabulary
+   rather than in new components.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html, body, #root { height: 100%; }
+body { margin: 0; background: var(--sunken); }
+
+.app {
+  min-width: 0;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+.page { flex: 1; }
+
+/* The one place the spec is wrong rather than merely undrawn. `.rail__t` and
+   `.rail__s` are inline spans, and the `margin-top`, `overflow` and
+   `text-overflow` the spec puts on them do nothing to an inline box — so the
+   band's headline and its quote render as one run-on sentence. Corrected here
+   rather than in the lifted block above, so what was moved stays what was
+   moved. */
+.rail__t, .rail__s { display: block }
+
+/* The chrome's nav is real navigation here, not three words in a mockup. */
+.chrome nav a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 1px;
+}
+.chrome nav a:hover { color: var(--fg-2); }
+.chrome nav a[aria-current='page'] { color: var(--fg); font-weight: 500 }
+.chrome nav a[aria-disabled='true'] { opacity: .45; cursor: default }
+.chrome nav a[aria-disabled='true']:hover { color: inherit }
+
+/* What the spec could not have: this deployment runs on synthetic data, and
+   some of what is drawn is illustrative until Phase 5 fills it in. One chip,
+   in the chrome, rather than a caveat repeated on every panel. */
+.demo-chip {
+  font-family: var(--font-mono); font-size: var(--t-2xs); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--warn-fg);
+  border: 1px solid var(--warn-line); background: var(--warn-soft);
+  border-radius: var(--r-xs); padding: 2px 7px; white-space: nowrap;
+}
+
+/* The review row's arrow is a link, and the whole row is clickable — but the
+   arrow stays, because a row with no visible affordance is a row nobody
+   clicks. */
+.dt tr[data-href] { cursor: pointer }
+.dt tr[data-href]:hover td { background: var(--inset) }
+.tr--urgent[data-href]:hover td { background: var(--danger-soft); filter: brightness(.985) }
+a.act-link { text-decoration: none }
+
+/* `.ctl` is a static chip in the spec. Two of them are real controls here. */
+input.ctl, select.ctl, button.ctl {
+  font: inherit; font-size: var(--t-xs); color: var(--fg-2);
+  appearance: none; cursor: pointer;
+}
+input.ctl { cursor: text; color: var(--fg) }
+input.ctl::placeholder { color: var(--fg-4) }
+input.ctl:focus-visible, select.ctl:focus-visible { border-color: var(--accent) }
+.pg[data-page] { cursor: pointer; background: var(--surface); color: var(--fg-3) }
+.pg--off { cursor: default }
+
+/* Inert until Phase 5 — a control that cannot honour what it offers is worse
+   than one that is plainly not offering it yet. */
+[disabled], .is-inert {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.cmp .fld__v--type[disabled] { background: rgba(255,255,255,.5) }
+textarea.fld__v, select.fld__v { font: inherit; font-size: var(--t-xs); width: 100%; resize: none }
+
+/* Loading, empty, and refused. Three states, one shape. */
+.note {
+  padding: var(--s-8) var(--s-5);
+  text-align: center;
+  color: var(--fg-4);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+.note b { display: block; color: var(--fg-2); font-weight: 500; margin-bottom: 4px }
+.note--bad { color: var(--danger-fg) }
+.note--bad b { color: var(--danger-fg) }
+
+/* ── sign in ──
+   The one screen with no data behind it and no navigation off it. Centred,
+   one card, and a sentence saying accounts are granted rather than created —
+   which is `config.accounts` being seeded by a migration, on the screen. */
+.signin {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--s-8);
+  background: var(--sunken);
+}
+.signin__card {
+  width: 100%; max-width: 26rem;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: var(--s-8) var(--s-6);
+  display: flex; flex-direction: column; gap: var(--s-5);
+}
+.signin__card .wordmark { font-size: var(--t-lg) }
+.signin__card p { margin: 0; font-size: var(--t-sm); color: var(--fg-4); line-height: 1.6 }
+.signin__f { display: flex; flex-direction: column; gap: var(--s-4) }
+.signin__f label { display: block; font-size: var(--t-2xs); text-transform: uppercase;
+  letter-spacing: .08em; color: var(--fg-4); margin-bottom: 5px }
+.signin__f input {
+  width: 100%; font: inherit; font-size: var(--t-sm); color: var(--fg);
+  background: var(--inset); border: 1px solid var(--line);
+  border-radius: var(--r-xs); padding: var(--s-3);
+}
+.signin__f input:focus-visible { border-color: var(--accent) }
+.signin__f .btn-grad { width: 100%; padding: var(--s-4) }
+.signin__err {
+  font-size: var(--t-xs); color: var(--danger-fg);
+  border-left: 3px solid var(--danger); background: var(--danger-soft);
+  padding: var(--s-3) var(--s-4); line-height: 1.5;
+}
+
+/* The sign-out affordance is the only thing on the right of the chrome that
+   is not the ⌘K hint, and it is quiet: signing out is not a thing anyone
+   should reach for by accident. */
+.chrome__me { font-size: var(--t-xs); color: var(--fg-4); white-space: nowrap }
+.chrome__me b { color: var(--fg-2); font-weight: 500 }
+.chrome__out {
+  font: inherit; font-size: var(--t-xs); color: var(--fg-4);
+  background: none; border: 0; cursor: pointer; padding: 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+.chrome__out:hover { color: var(--fg-2) }
+
+@media (max-width: 860px) {
+  .page { padding: var(--s-5) var(--s-4) var(--s-6) }
+  .panes { grid-template-columns: 1fr }
+  .stats { justify-content: flex-start; text-align: left; gap: var(--s-6) }
+  .stat { align-items: flex-start }
+}

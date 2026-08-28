@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd ../.. && npm run build:dashboard",
+  "outputDirectory": "dist",
+  "installCommand": "cd ../.. && npm ci",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://metafora.fly.dev/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

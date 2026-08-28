@@ -4,7 +4,7 @@ What is left to build, in order. Portfolio demo on synthetic data — no PHI pos
 [`system-map.md`](./system-map.md) is what the pieces are, [`deployment.md`](./deployment.md) is
 where they run.
 
-**Status:** 2026-08-25.
+**Status:** 2026-08-28.
 
 ---
 
@@ -19,8 +19,8 @@ where they run.
   `clinical.results`. Append-only triggers under test (`make test-pg`).
 - **Persistence — Phase 1, below.** A call now survives the process that ran it.
 - **Auth — Phase 2, below.** The record is readable by a named clinician and by nobody else.
-- **Deploy — Phase 3, below.** The image, the machine, the caps and the way back are built; the
-  accounts they run on are not yet created.
+- **Deploy — Phase 3, below.** Live since 2026-08-27 and proven by a real call.
+- **Clinician dashboard — Phase 4, below.** The record is now read by the person it is for.
 
 ---
 
@@ -139,7 +139,7 @@ Neither is a code change, and neither blocks `make check`.
 
 ---
 
-## 3 · Deploy — **built, not yet run**
+## 3 · Deploy — **done**
 
 *Why now:* one deploy of something durable rather than two of something that evaporates — the
 first public URL already keeps what it records and already refuses an anonymous reader. Both of
@@ -194,8 +194,10 @@ and Postgres in one request, then ended), and that `GET /interviews` is still 40
 every deploy in `.github/workflows/deploy.yml`, which captures the running image first and
 restores it when the smoke test fails.
 
-**Still to do, and it needs the accounts:** the Groq spend limit, the LiveKit/Fly/Sentry projects,
-the first `fly deploy`, and the measurement below.
+**Run on 2026-08-27.** `https://metafora-call.vercel.app` in front of `https://metafora.fly.dev`;
+the first call through it completed and persisted. `deployment.md` §3 is what is actually
+running. Still open: the concurrency measurement below — three simultaneous calls holding their
+latency, which is the number `MAX_CONCURRENT_SESSIONS` should be set from rather than guessed.
 
 **Done:** a stranger completes an interview on their phone · three at once hold their latency,
 and `MAX_CONCURRENT_SESSIONS` is set from what that showed rather than guessed · the row survives
@@ -203,19 +205,83 @@ a redeploy · a rollback has been performed once on purpose.
 
 ---
 
-## 4 · Clinician dashboard — read path
+## 4 · Clinician dashboard — read path — **done**
 
-*Why now:* the routes exist and are tested, so this is UI over them — built against a live
-authenticated backend instead of a local stand-in.
+*Why it went here:* the routes existed and were tested, so this was UI over them — and built
+against the deployed authenticated backend rather than a local stand-in, which is what turned
+`scripts/auth.sh` from a script into a contract that had already been honoured once.
 
-- `frontend/shared/tokens.css` — real, lifted from `docs/ux/clinical-dashboard.html`.
-- `frontend/dashboard/` — Vite app, Supabase Auth sign-in.
-- Screens: **dashboard** (stat tiles + review table) · **interview detail** (transcript with every
-  safety scan, including the ones that matched nothing; review composer read-only) ·
-  **patients** (search + own list).
-- `make dev` grows a fourth process; `make check` typechecks it; deploy gains a second static site.
+**Four small things on the backend, and no new authorisation anywhere.**
 
-**Done:** sign in, find the call, read its transcript with the cleared scans.
+- **`GET /config`** — unauthenticated, beside `/health`, because it is a fact about the process
+  and has no audience. It hands the browser `supabaseUrl` and `supabaseAnonKey`, which is what
+  keeps `deployment.md` §3's *"one piece of configuration"* true of the dashboard too: rotating
+  the anon key is a secret change, not a rebuild of a static site. `SUPABASE_ANON_KEY` is
+  deliberately **not** in `config.py`'s `_problems()` — everything on that list would fail a
+  *patient*, and crash-looping the box over a clinician's sign-in key would take the demo down
+  to fix the other half. The route answers 503 with a sentence instead.
+- **`GET /me`** — the one clinical route that reads no clinical data. Without it the greeting is
+  an email address and the frontend derives a role from whichever request happened to succeed,
+  which is a client-side authorisation check waiting to be written. It returns `Account`, not
+  `CurrentUser`: `sub` names the credential rather than the person.
+- **The meter, in the join.** `captured_fields` / `total_fields` on `InterviewSummary`, from one
+  `left join lateral` over `clinical.results`. The review table draws "9/16 captured" on every
+  row, and the alternative was a detail request per line.
+- **Tests.** `/config` in `tests/test_app.py` (configured, unconfigured, half-configured); `/me`
+  added to `test_auth.py`'s `GUARDED` list, so all eleven refusal cases now cover it, plus the
+  two positives; the counts in `test_reads.py` under the postgres marker, including 0/0 for a
+  call that has not ended.
+
+**`tokens.css` was not a stub.** This section used to say it was, and to say the dashboard would
+make it real. It was already 344 lines: tokens, base, *and* the patient portal's components. The
+split was forced rather than tidy — `tokens.css` defined `.app` as the portal's flex column and
+the clinical spec uses `.app` for its own shell, so one file could not hold both. Now:
+`frontend/shared/tokens.css` is tokens and base, the set all three surfaces share;
+`frontend/call/src/portal.css` and `frontend/dashboard/src/dashboard.css` are per-surface, both
+moved from their specs verbatim rather than reinterpreted.
+
+**`frontend/dashboard/`** — a third npm workspace mirroring `frontend/call`, `:5174`, the same
+relative `/api`. `@supabase/supabase-js` is the one new dependency, chosen for silent refresh
+before `exp` rather than for the sign-in form: a hand-rolled client signs in fine and then 401s
+an hour later, in front of someone. Routing is forty lines over `pushState` — three screens did
+not need a router, but they did need `vercel.json` to send unmatched paths to `index.html`.
+
+**Sign-in says what `config.accounts` is.** No sign-up link, and a sentence saying accounts are
+granted rather than created. A verified stranger gets the 403 *with its reason*, rendered as
+`deps.py` wrote it — it is the only refusal in this system that tells the caller something
+useful, and turning it into "forbidden" would have thrown that away.
+
+**Three screens, and the band.** Dashboard (stat tiles + review table, searchable and paged) ·
+interview detail (transcript with **every** safety scan including the cleared ones, the history
+timeline built from the patient's other interviews, review composer read-only) · patients (search
++ own list, `origin` distinguishing a dispatched patient from a demo visitor). The escalation
+band is real: it renders off `outcome = 'safety'`, counts and clocks from the record, and quotes
+the patient's own words from the turn the gate stopped on — one lazy detail fetch, because the
+list route carries no transcripts and should not.
+
+**What is drawn and is not true.** The spec draws NHS numbers, dates of birth, consent chips, a
+signature ledger and a patient-experience chart. None of them exist: the ledger and the
+escalations table are Phase 5, and this product has never collected demographics — a demo visitor
+gives a first name. They are drawn anyway, because the phase is building the spec's screens, and
+**every invented value is in `frontend/dashboard/src/demo.ts` and nowhere else** — deterministic
+from a real id so nothing moves between renders, and deletable in one commit as Phase 5 fills
+them in. The chrome carries a `demo data` chip. Where a real column could fill a spec slot it
+does: the third stat tile counts queued interviews rather than the invitation windows Phase 5
+will introduce, and the scheduled-calls card is real and empty.
+
+Everything that writes is disabled rather than hidden — impression, disposition, Sign, Add
+patient, Deployments. A control that cannot honour what it offers is worse than one that plainly
+is not offering it yet, and the shape of the act is the argument the composer is making.
+
+**Deploy — the one part not yet run.** A second Vercel project, `metafora-dashboard`, Root
+Directory `frontend/dashboard`, same include-files-outside-the-root setting, and
+`fly secrets set SUPABASE_ANON_KEY` before the deploy that adds `/config`. Until then the
+dashboard runs from a laptop against the deployed backend, which is how it was built and is not
+the same thing.
+
+**Done:** sign in, find the call, read its transcript with the cleared scans — done locally, on
+2026-08-28, against the live record: a call driven through the gate produced a cleared scan and a
+hit, and both render on the turn they ran on.
 
 ---
 

@@ -43,16 +43,27 @@ _SUMMARY_COLUMNS = """
     p.origin      as patient_origin,
     i.protocol_id,
     pr.label      as protocol_label,
+    f.captured    as captured_fields,
+    f.total       as total_fields,
     i.scheduled_for,
     i.started_at,
     i.ended_at,
     i.created_at
 """
 
+#: The review table draws a "9/16 captured" meter on every row. Counting it
+#: here is one lateral join; counting it in the browser is a detail request per
+#: row. `coalesce` because an interview that never started has no results at
+#: all, and a null meter would render as a broken one.
 _SUMMARY_FROM = """
     from clinical.interviews i
     join clinical.patients  p  on p.id = i.patient_id
     join config.protocols   pr on pr.id = i.protocol_id
+    left join lateral (
+        select coalesce(count(*) filter (where r.status = 'captured'), 0)::int as captured,
+               coalesce(count(*), 0)::int                                      as total
+        from clinical.results r where r.interview_id = i.id
+    ) f on true
 """
 
 

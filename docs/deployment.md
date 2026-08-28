@@ -4,9 +4,9 @@
 code blocks that today, and what the target is for a **portfolio deployment** — a public,
 clickable demo on synthetic data, not a clinical deployment on real patients.
 
-**Status:** 2026-08-27 · **deployed**, and proven by a real call (§3). `Dockerfile`,
-`fly.toml`, `frontend/call/vercel.json`, `scripts/smoke.sh` and
-`.github/workflows/deploy.yml` are the executable form of this page. If a decision below
+**Status:** 2026-08-28 · **deployed**, and proven by a real call (§3). `Dockerfile`,
+`fly.toml`, `frontend/call/vercel.json`, `frontend/dashboard/vercel.json`, `scripts/smoke.sh`
+and `.github/workflows/deploy.yml` are the executable form of this page. If a decision below
 changes, change it here rather than in a commit message.
 
 Read [`system-map.md`](./system-map.md) first for what the pieces are. This page only covers
@@ -64,6 +64,7 @@ if this ever carries a real patient, §2 is the paragraph to revisit first.
 | Piece | Where | Cost |
 |---|---|---|
 | `frontend/call` | Vercel — `metafora-call`, static Vite build, Root Directory `frontend/call` | free |
+| `frontend/dashboard` | Vercel — `metafora-dashboard`, static Vite build, Root Directory `frontend/dashboard` · **built, project not yet created** | free |
 | LiveKit | LiveKit Cloud, free tier | free |
 | backend (FastAPI + Pipecat) | Fly.io — `metafora`, one `shared-cpu-1x` / 1 GB machine in `lhr`, **always-on** | ~$6/mo |
 
@@ -72,6 +73,13 @@ Live since 2026-08-27: **https://metafora-call.vercel.app** in front of
 scanned before generation, both passes firing, two fields captured into `clinical.results`. That
 sentence is the whole of §6's argument, so it is worth recording that it is now a fact rather
 than a plan.
+
+**The clinician portal is built and not yet up.** Phase 4 runs against the deployed backend from
+a laptop, which is how it was developed and is not the same as being deployed. Three things, in
+this order: `fly secrets set SUPABASE_ANON_KEY` (before the deploy that adds `/config`, or the
+route answers 503 to a dashboard that is otherwise fine), the second Vercel project, and a
+sign-in against `metafora.fly.dev` from the Vercel URL rather than through the Vite proxy — which
+is the first time the rewrite, and not the proxy, is what carries `/api`.
 
 **1 GB minimum, and no scale-to-zero.** A 512 MB tier will not hold onnxruntime + Silero +
 SmartTurn. `min_machines_running = 1`: a cold link that shows a spinner while Python imports
@@ -84,13 +92,31 @@ no CORS, and `ALLOWED_ORIGINS` never has to be right.
 
 The SFU address is not build config either. `POST /session` returns `LIVEKIT_PUBLIC_URL` in its
 bootstrap (`services/core/routes/session.py:116`) and the browser connects to whatever it is
-handed — so changing SFU is a Fly secret, not a rebuild. The frontend holds exactly one piece of
+handed — so changing SFU is a Fly secret, not a rebuild. Each frontend holds exactly one piece of
 configuration, and it is the rewrite destination.
 
-**The Vercel setting that is not optional.** Root Directory is `frontend/call`, and *include
-files outside the root directory* must stay **on**. `@metafora/call` depends on the
-`@metafora/contracts` and `@metafora/ui` workspaces at the repo root, and `vercel.json` installs
-with `cd ../.. && npm ci`. Restrict the build to the root directory and those two packages stop
+That claim survived the dashboard, which is the surface most likely to have broken it: it has to
+reach Supabase Auth directly, so it needs the project URL and the anon key in the browser. Those
+arrive from **`GET /config`** — unauthenticated, because it is the thing you read *in order to*
+authenticate — rather than from `VITE_` variables baked into the bundle. Same argument as the SFU
+address: rotating the anon key is `fly secrets set` and not a rebuild of a static site, and the
+two Vercel projects have no environment variables at all.
+
+`SUPABASE_ANON_KEY` is deliberately **not** in `config.py`'s `_problems()`. Everything that list
+refuses to boot on would fail a patient; a missing dashboard key only fails a clinician's
+sign-in, and crash-looping the box over it would take the patient demo down to fix the other
+half. `/config` answers 503 with a sentence the dashboard renders instead.
+
+**The dashboard's second rewrite.** `frontend/dashboard/vercel.json` sends `/api/:path*` to Fly
+as the portal does, and then everything else to `/index.html`, because the three screens are
+real paths (`/`, `/interviews/{id}`, `/patients`) and a refresh on a deep link 404s without it.
+Vercel matches the filesystem before rewrites, so the catch-all does not swallow the assets.
+
+**The Vercel setting that is not optional.** Root Directory is `frontend/call` (and
+`frontend/dashboard` on the second project), and *include files outside the root directory* must
+stay **on** for both. `@metafora/call` and `@metafora/dashboard` depend on the
+`@metafora/contracts` and `@metafora/ui` workspaces at the repo root, and each `vercel.json`
+installs with `cd ../.. && npm ci`. Restrict the build to the root directory and those two packages stop
 resolving — the same class of failure as the health check in §5: the app is fine, the platform
 was not given what it needs to see.
 

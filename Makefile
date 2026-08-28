@@ -1,40 +1,43 @@
 # metafora.care — one entry point for running and checking the app.
 #
 # The backend is a single Python process (FastAPI + Pipecat); the SFU and the
-# patient portal are the only other things that run. `make dev` starts all
-# three in one terminal; `make api` / `make sfu` / `make web` are the same
-# three if you'd rather have a terminal each.
+# two frontends are the only other things that run. `make dev` starts all four
+# in one terminal; `make api` / `make sfu` / `make web` / `make dash` are the
+# same four if you'd rather have a terminal each.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 API_PORT ?= 3000
 WEB_PORT ?= 5173
+DASH_PORT ?= 5174
 SFU_PORT ?= 7880
-DEV_PORTS := $(API_PORT) $(WEB_PORT) $(SFU_PORT)
+DEV_PORTS := $(API_PORT) $(WEB_PORT) $(DASH_PORT) $(SFU_PORT)
 
 C_API := \033[36m
 C_SFU := \033[35m
 C_WEB := \033[32m
+C_DASH := \033[33m
 C_DIM := \033[2m
 C_OFF := \033[0m
 
 .PHONY: help setup install dev api sfu web stop restart ports \
-        check test lint typecheck imports build contracts e2e \
+        check test lint typecheck imports build contracts e2e dash \
         logs latency safety doctor clean guard-env
 
 ## ---- running ---------------------------------------------------------------
 
-dev: guard-env ## Start SFU + backend + patient portal together (ctrl-c stops all)
-	@printf '%b\n' "$(C_DIM)sfu :$(SFU_PORT)   api :$(API_PORT)   web :$(WEB_PORT)$(C_OFF)"
-	@printf '%b\n' "$(C_DIM)open http://localhost:$(WEB_PORT)$(C_OFF)"
+dev: guard-env ## Start SFU + backend + both frontends together (ctrl-c stops all)
+	@printf '%b\n' "$(C_DIM)sfu :$(SFU_PORT)   api :$(API_PORT)   web :$(WEB_PORT)   dash :$(DASH_PORT)$(C_OFF)"
+	@printf '%b\n' "$(C_DIM)patient http://localhost:$(WEB_PORT)   clinician http://localhost:$(DASH_PORT)$(C_OFF)"
 	@echo
 	@set -m; \
-	trap 'trap - INT TERM EXIT; printf "\nstopping...\n"; kill -TERM %1 %2 %3 2>/dev/null; wait 2>/dev/null; exit 0' INT TERM EXIT; \
+	trap 'trap - INT TERM EXIT; printf "\nstopping...\n"; kill -TERM %1 %2 %3 %4 2>/dev/null; wait 2>/dev/null; exit 0' INT TERM EXIT; \
 	livekit-server --dev 2>&1 | awk '{ print "$(C_SFU)[sfu]$(C_OFF) " $$0; fflush() }' & \
 	sleep 1; \
 	uv run python -m services.core.app 2>&1 | awk '{ print "$(C_API)[api]$(C_OFF) " $$0; fflush() }' & \
 	npm run --silent dev:call 2>&1 | awk '{ print "$(C_WEB)[web]$(C_OFF) " $$0; fflush() }' & \
+	npm run --silent dev:dashboard 2>&1 | awk '{ print "$(C_DASH)[dash]$(C_OFF) " $$0; fflush() }' & \
 	wait
 
 api: guard-env ## Backend only — FastAPI + Pipecat, on :3000
@@ -45,6 +48,9 @@ sfu: ## LiveKit SFU only, on :7880 (dev credentials)
 
 web: ## Patient portal only — Vite, on :5173
 	npm run dev:call
+
+dash: ## Clinician portal only — Vite, on :5174. Needs SUPABASE_URL + SUPABASE_ANON_KEY
+	npm run dev:dashboard
 
 stop: ## Kill whatever is listening on the dev ports
 	@for port in $(DEV_PORTS); do \
@@ -113,8 +119,9 @@ lint: ## ruff
 typecheck: ## Frontend + the generated contracts
 	npm run typecheck
 
-build: ## Production build of the patient portal
+build: ## Production build of both frontends
 	npm run build:call
+	npm run build:dashboard
 
 contracts: ## Regenerate shared/contracts from the pydantic models
 	uv run python scripts/gen_contracts.py
@@ -137,7 +144,7 @@ safety: ## Every safety decision across every session
 	@jq -c 'select(.type=="safety.scanned")' logs/*.jsonl 2>/dev/null || echo "no session logs yet"
 
 clean: ## Remove caches and build output (session logs are kept)
-	rm -rf .pytest_cache .ruff_cache frontend/call/dist
+	rm -rf .pytest_cache .ruff_cache frontend/call/dist frontend/dashboard/dist
 	find . -name __pycache__ -type d -not -path './.venv/*' -not -path './node_modules/*' -prune -exec rm -rf {} +
 
 ## ---- internals -------------------------------------------------------------

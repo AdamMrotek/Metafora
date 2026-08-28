@@ -31,7 +31,7 @@ CLINICIAN = "clinician@example.test"
 #: Every route that reads the record. Parametrised rather than tested one at a
 #: time: "which routes are behind the door" is the property, and a route added
 #: to this list is a route the whole file is asserted against.
-GUARDED = ["/interviews", "/interviews/iv_anything", "/patients"]
+GUARDED = ["/interviews", "/interviews/iv_anything", "/patients", "/me"]
 
 
 # ─── a signing key, and a key set served from memory ─────────────────────────
@@ -298,6 +298,27 @@ async def test_a_seeded_clinician_gets_through(door, signing_key, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+async def test_a_clinician_is_told_who_they_are(door, signing_key):
+    """`GET /me` reads no clinical data — it reports the identity `require_role`
+    has already decided about, so the dashboard greets a person by name instead
+    of deriving one from an email address."""
+    response = await get("/me", token(signing_key))
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "email": CLINICIAN,
+        "role": "clinician",
+        "displayName": "Test Clinician",
+    }
+
+
+async def test_me_does_not_hand_back_the_auth_id(door, signing_key):
+    """`sub` names the credential rather than the person, and a browser has no
+    use for it. Asserted rather than assumed, because `CurrentUser` carries it
+    and returning that object directly would have been the shorter route."""
+    assert "sub" not in (await get("/me", token(signing_key))).json()
 
 
 async def test_the_identity_reaches_the_query_not_just_the_door(door, signing_key, monkeypatch):

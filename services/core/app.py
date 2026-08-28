@@ -30,12 +30,14 @@ from services.core.config import (
     MAX_CONCURRENT_SESSIONS,
     PORT,
     SENTRY_DSN,
+    SUPABASE_ANON_KEY,
     SUPABASE_URL,
 )
 from services.core.lifecycle import drain
-from services.core.routes import interviews, patients, session
+from services.core.routes import interviews, me, patients, session
 from services.core.store import live_sessions
 from shared import auth
+from shared.contracts.models import PublicConfig
 
 
 @asynccontextmanager
@@ -165,6 +167,7 @@ app.add_middleware(
 app.include_router(session.router)
 app.include_router(interviews.router)
 app.include_router(patients.router)
+app.include_router(me.router)
 
 
 @app.exception_handler(HTTPException)
@@ -197,6 +200,30 @@ async def health():
         # all. Whether the door is installed, never who came through it.
         "auth": auth.configured(),
     }
+
+
+@app.get("/config")
+async def public_config() -> PublicConfig:
+    """What the dashboard's browser needs before it can sign anyone in.
+
+    Unauthenticated, because it is the thing you read *in order to* authenticate,
+    and it carries nothing that is not already public: the project URL is in
+    every token's `iss` and the anon key is published to every browser that
+    signs in. What decides who has a caseload is `config.accounts`, which is
+    seeded by a migration and is not reachable from here.
+
+    It lives beside `/health` rather than in a router because it has no
+    audience — it is a fact about this process, like the two `/health` reports.
+
+    Missing configuration is a 503 with a sentence, matching what the clinical
+    routes say when the door is not installed. Deliberately not a boot failure:
+    `config.py` refuses to start on anything that would fail a *patient*, and a
+    dashboard key is not one of those — crash-looping the box over it would take
+    the patient demo down to fix a clinician's sign-in.
+    """
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(503, "this server has no sign-in configured")
+    return PublicConfig(supabase_url=SUPABASE_URL, supabase_anon_key=SUPABASE_ANON_KEY)
 
 
 def main() -> None:

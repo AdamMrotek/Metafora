@@ -6,12 +6,15 @@
   "workspaces": [
     "shared/contracts",
     "frontend/shared",
-    "frontend/call"
+    "frontend/call",
+    "frontend/dashboard"
   ],
   "scripts": {
     "dev:call": "npm run dev --workspace=@metafora/call",
     "build:call": "npm run build --workspace=@metafora/call",
-    "typecheck": "tsc -p shared/contracts && tsc -p frontend/call",
+    "dev:dashboard": "npm run dev --workspace=@metafora/dashboard",
+    "build:dashboard": "npm run build --workspace=@metafora/dashboard",
+    "typecheck": "tsc -p shared/contracts && tsc -p frontend/call && tsc -p frontend/dashboard",
     "livekit": "livekit-server --dev"
   },
   "engines": {

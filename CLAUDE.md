@@ -1,7 +1,7 @@
 # Metafora — orientation
 
 Clinical voice intake. One FastAPI + Pipecat process runs the HTTP API *and* the conversation.
-Python 3.12, `uv`. Frontend is one Vite/React app. ~5k lines total — small enough to read.
+Python 3.12, `uv`. Two Vite/React frontends — the patient's and the clinician's. Small enough to read.
 
 ## Commands
 
@@ -9,20 +9,21 @@ Python 3.12, `uv`. Frontend is one Vite/React app. ~5k lines total — small eno
 
 | | |
 |---|---|
-| `make dev` | SFU + backend + portal together (ctrl-c stops all) |
+| `make dev` | SFU + backend + both portals together (ctrl-c stops all) |
 | `make check` | test + lint + typecheck — everything CI runs |
 | `make test` | `uv run pytest` — no API key, no LiveKit needed |
 | `make contracts` | regenerate `shared/contracts/src/*.ts` after editing a pydantic model |
-| `make stop` | free the dev ports (:3000 :5173 :7880) |
+| `make stop` | free the dev ports (:3000 :5173 :5174 :7880) |
 
 Always `uv run <cmd>`, never bare `python`/`pytest`.
 
 ## Map
 
 **`services/core/`** — HTTP + state. `app.py` is the *application* — lifespan, CORS, error body,
-`/health` — and the routes live in `routes/`, split by audience: `session.py` is the patient's and
-holds no credential, `interviews.py` + `patients.py` are the clinician's and every route is behind
-`require_role`. `lifecycle.py` is the call itself (join, speak, teardown, drain), shared by the
+`/health`, and `/config`, which hands a browser the Supabase project and anon key so neither
+frontend bakes one in — and the routes live in `routes/`, split by audience: `session.py` is the
+patient's and holds no credential, `interviews.py` + `patients.py` + `me.py` are the clinician's
+and every route is behind `require_role`. `lifecycle.py` is the call itself (join, speak, teardown, drain), shared by the
 session router and `lifespan`. `store.py` live session handles here, the durable record in
 Postgres · `reads.py` the dashboard's SQL, every function taking a `CurrentUser` · `db.py` the only
 pool · `tokens.py` LiveKit tokens · `config.py` env · `queue.py` dispatch (`resolve_interview`).
@@ -49,7 +50,20 @@ about this repo: `app.py`'s `lifespan` hands it its issuer, its keys and its dir
 `config.accounts` is **seeded by a migration, never by the application** — signing up must not be
 the same act as being granted a caseload. `make test-pg` runs them against a throwaway Postgres.
 
-**`frontend/call/src/`** — patient portal. `App.tsx`, `call/useCall.ts` is the LiveKit hook.
+**`frontend/call/src/`** — patient portal. `App.tsx`, `call/useCall.ts` is the LiveKit hook,
+`portal.css` its components.
+
+**`frontend/dashboard/src/`** — clinician portal, the read path (`:5174`). `main.tsx` boots in one
+order that cannot be reshuffled: `/config` → Supabase client → `GET /me` → the app. `api.ts` is
+every read, `data.tsx` fetches the two lists once and shares them, `router.tsx` is forty lines
+over `pushState`, `screens/` is the three screens. **`demo.ts` is every value on the screen that
+no query produced** — NHS numbers, DOB, the ledger hashes, the experience chart — deterministic
+from a real id, and the only file Phase 5 has to delete. `dashboard.css` is
+`docs/ux/clinical-dashboard.html`'s `<style>` block, moved rather than reinterpreted.
+
+**`frontend/shared/tokens.css`** — tokens and base, and only those: the set all three surfaces
+share. Components live with their surface, because `.app` means one thing to the portal and
+another to the clinical shell.
 
 **`tests/`** — mirrors module names (`test_gate.py`, `test_machine.py`, …). `test_auth.py` is in
 plain `make test`: it generates an EC keypair and serves the JWKS from memory, so the real ES256
@@ -60,9 +74,9 @@ path runs with no network and no project. `test_reads.py` and `test_persistence.
 **`docs/`** — the only place prose lives. `system-map.md` = *intended* architecture,
 `agent-review-and-pipecat-decision.md` = why Pipecat/Python. Read only for architectural tasks.
 
-**Does not exist yet** (don't go looking): the dashboard and studio apps in
-`system-map.md` are unbuilt; `docs/ux/*.html` are frozen specs, not running code.
-`frontend/shared/` is a stub (`tokens.css` only). Audio recording/retention is unbuilt —
+**Does not exist yet** (don't go looking): the studio app in `system-map.md` is unbuilt, and so
+is everything the dashboard *writes* — dispatch, escalations, the signature ledger (all Phase 5).
+`docs/ux/*.html` are frozen specs, not running code. Audio recording/retention is unbuilt —
 `store-media` in `system-map.md` is its intended home; clinical-research regulation may require it.
 
 **Skip**: `logs/` (~460 files), `node_modules/`, `.venv/`, `frontend/**/dist/`, `*.jsonl`, `.*_cache/`.
@@ -85,13 +99,17 @@ path runs with no network and no project. `test_reads.py` and `test_persistence.
 
 Conventional commits (`feat:`, `refactor:`, `docs:`). ruff only — no mypy, no black; `make typecheck`
 is TypeScript only, Python is unchecked. Three egresses, all named: Groq for STT/LLM/TTS,
-Supabase for the record (Postgres) and the signing keys (`/auth/v1/.well-known/jwks.json`), and
+Supabase for the record (Postgres), the signing keys (`/auth/v1/.well-known/jwks.json`) and the
+clinician's sign-in — which the dashboard's *browser* makes directly, with the anon key `/config`
+hands it, so it is the same egress and not a fourth — and
 Sentry for failures — which carries no part of the product by construction, because `app.py`
 gives it no request bodies and drops anything raised inside `services/agent/`.
 `GROQ_API_KEY` is the one env var `make dev` requires; `DATABASE_URL` and `SUPABASE_URL` are both
 optional in dev and required outside it (`Dockerfile` + `fly.toml` deploy the backend, and
 `config.py` names every secret it refuses to boot without) — empty `DATABASE_URL` means JSONL on disk and an
 in-process store, empty `SUPABASE_URL` means the clinical routes refuse everyone with 503, which
-is a refusal and never an open door. `scripts/auth.sh` signs in and calls a clinical route, which
-is the dashboard's contract before the dashboard exists. `.env.example` has the rest, all dev
-defaults.
+is a refusal and never an open door. `SUPABASE_ANON_KEY` is in neither list: it is read only by
+`/config`, and empty means the dashboard is told so rather than the box refusing to boot — a
+clinician's sign-in key must not be able to take the patient path down. `scripts/auth.sh` is the
+same contract from a shell, and it was written before the dashboard was. `.env.example` has the
+rest, all dev defaults.

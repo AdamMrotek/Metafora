@@ -165,6 +165,35 @@ async def test_a_completed_call_shows_its_outcome(live_db):
     assert row.ended_at is not None
 
 
+async def test_the_row_carries_how_much_of_the_script_was_captured(live_db):
+    """The review table draws a meter per row. Counting it in the join is what
+    stops the dashboard making a detail request per line to fill it in."""
+    interview = await resolve_interview()
+    session = await create_session(interview, PROTOCOLS[interview.protocol_id])
+    session.machine.capture("day_mood", "Not bad, thanks")
+    await end_session(session, "complete")
+    await session.writer.close()
+
+    rows = await reads.interviews(user())
+    row = next(r for r in rows if r.id == interview.id)
+
+    assert (row.captured_fields, row.total_fields) == (1, 2)
+    # And the same numbers on the detail, which shares `_SUMMARY_COLUMNS`.
+    detail = await reads.interview(user(), interview.id)
+    assert (detail.interview.captured_fields, detail.interview.total_fields) == (1, 2)
+
+
+async def test_an_interview_with_no_results_yet_meters_zero(live_db):
+    """`clinical.results` is written when the call ends, so a running one has no
+    rows at all. `coalesce` in the join is why that is 0/0 and not a null the
+    browser would render as a broken meter."""
+    interview = await resolve_interview()
+
+    row = next(r for r in await reads.interviews(user()) if r.id == interview.id)
+
+    assert (row.captured_fields, row.total_fields) == (0, 0)
+
+
 async def test_the_review_table_is_bounded(live_db):
     """A route with no ceiling is one `select *` away from streaming the whole
     record down a phone connection."""

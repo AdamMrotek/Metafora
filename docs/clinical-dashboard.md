@@ -1,9 +1,12 @@
 # Clinician dashboard — `frontend/dashboard/`
 
-The clinician-facing half of the product. **Not built yet** — `frontend/dashboard/`
-is an empty directory, and this page describes the design spec
-`docs/ux/clinical-dashboard.html`, which is frozen, not running code. (The
-wordmark in that file, `threep.io`, is placeholder branding.)
+The clinician-facing half of the product. **Built — the read path** (roadmap Phase 4):
+`frontend/dashboard/`, a Vite app on `:5174` in dev, over `GET /interviews`,
+`GET /interviews/{id}`, `GET /patients` and `GET /me`. What is described below
+is the design spec `docs/ux/clinical-dashboard.html`, which is frozen; §*What is
+real* at the bottom says which of it the app actually backs with a query. (The
+wordmark in the spec, `threep.io`, is placeholder branding; the app says
+`metafora.care`.)
 
 ## Who uses it
 
@@ -70,23 +73,50 @@ interview comes back in one of three states:
 | **Issue raised** | It did not complete, or a soft concern was raised — abandoned, verification locked. |
 | **Review ready** | It ran to the end and the output is complete. Most interviews end here. |
 
-## What it would need
+## What is real
 
-Nothing on this screen exists in the backend yet. Today `services/core/store.py`
-holds sessions in memory for the length of a call and `logs/<sessionId>.jsonl` is
-the durable artefact; the dashboard wants the opposite — a persisted clinical
-record, queryable by patient, surviving restarts. Specifically:
+Everything the spec draws is on the screen. Not all of it is a query, and the
+difference matters more than the screenshot does, so it is written down here
+rather than discovered.
 
-- **Accounts and roles** (`shared-auth` in `docs/system-map.md`) — the patient
-  portal deliberately has none; this cannot work without them.
-- **Patients, panels and assignment** — there is no patient store, only
-  `QueuedInterview.patient` on one in-flight session.
-- **Interview results, persisted and listable** — the review table is a query,
-  and JSONL on disk is not one.
-- **A push channel for escalations** — the band claims seconds, and
-  `services/agent/safety.py` already produces the `ScanResult` it would carry.
+**Backed by the record.** The review table, its capture meter
+(`captured_fields`/`total_fields`, counted in a lateral join over
+`clinical.results`), every status and outcome sentence, the stat tiles, the
+transcript — including **every** `safety.scanned`, the ones that matched nothing
+as much as the one that fired — the captured fields, the patients list with
+`origin` distinguishing a dispatched patient from a demo visitor, the history
+timeline, and the escalation band, which counts and clocks real
+`outcome = 'safety'` rows and quotes the patient's own words from the turn the
+gate stopped on.
+
+**Illustrative — `frontend/dashboard/src/demo.ts`, and nowhere else.** NHS
+numbers, dates of birth, consent chips, the referral context in the issued
+summary, the composer's record hash and ledger head, and the whole
+patient-experience panel. This product has never collected demographics — a demo
+visitor gives a first name — and nothing asks a patient how the interview went.
+Each value is derived from a real id so it does not move between renders, and
+the file is deletable in one commit. The chrome carries a `demo data` chip.
+
+**Deliberately inert until Phase 5.** Clinical impression, disposition, Sign,
+Add patient, the Deployments screen, and the band's own action. A control that
+cannot honour what it offers is worse than one that plainly is not offering it
+yet.
+
+## What it still needs
+
+- **A push channel for escalations** — the band claims seconds and currently
+  learns about one when the page loads. Phase 5: `clinical.escalations` and an
+  SSE stream from `svc-core`, scoped by the same `where` clause as the read
+  routes.
+- **Dispatch** — `POST /interviews`, `clinical.invitations`, and the emailed
+  link. It is also the only thing that ever sets `clinician_email`, which is the
+  column every scope in `reads.py` turns on; until it exists, a caseload is the
+  unowned demo rows.
 - **A signature ledger** — the composer's hash and ledger head imply
   append-only, tamper-evident storage that does not exist.
+- **A patient profile screen** — the patients table's arrow opens that person's
+  most recent interview, because there is nowhere else for it to go.
 
-The design tokens are in the spec's `<style>` block; `frontend/shared/` is
-currently a `tokens.css` stub, and this is the app that would make it real.
+The design tokens live in `frontend/shared/tokens.css`, which all three surfaces
+share; the clinical components are `frontend/dashboard/src/dashboard.css`, lifted
+from the spec's `<style>` block verbatim.

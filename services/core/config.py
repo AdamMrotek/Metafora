@@ -80,6 +80,19 @@ JWT_ISSUER = f"{SUPABASE_URL}/auth/v1" if SUPABASE_URL else ""
 #: before any of this verifies anything.
 JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else ""
 
+#: The project's public anon key. This process never verifies anything with it —
+#: it is what the *dashboard's browser* needs to reach `/auth/v1/token`, handed
+#: down by `GET /config` rather than baked into a bundle, for the same reason
+#: `LIVEKIT_PUBLIC_URL` is handed down in the session bootstrap: changing it is
+#: then a secret and not a rebuild.
+#:
+#: Deliberately **not** in `_problems()`. Everything else refused there would
+#: fail a patient; this one only fails a clinician's sign-in, and a box that
+#: crash-loops over a dashboard key has taken the patient demo down with it.
+#: `GET /config` answers 503 with a sentence instead — a refusal, never an
+#: open door.
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+
 #: The frontend stops sharing an origin once it deploys separately, so its
 #: origin has to be named rather than implied by a Vite proxy.
 ALLOWED_ORIGINS = [
