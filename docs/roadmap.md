@@ -20,7 +20,8 @@ where they run.
 - **Persistence — Phase 1, below.** A call now survives the process that ran it.
 - **Auth — Phase 2, below.** The record is readable by a named clinician and by nobody else.
 - **Deploy — Phase 3, below.** Live since 2026-08-27 and proven by a real call.
-- **Clinician dashboard — Phase 4, below.** The record is now read by the person it is for.
+- **Clinician dashboard — Phase 4, below.** The record is now read by the person it is
+  for. Live since 2026-08-28; dispatch — the screen that *writes* one — is Phase 5.
 
 ---
 
@@ -273,15 +274,25 @@ Everything that writes is disabled rather than hidden — impression, dispositio
 patient, Deployments. A control that cannot honour what it offers is worse than one that plainly
 is not offering it yet, and the shape of the act is the argument the composer is making.
 
-**Deploy — the one part not yet run.** A second Vercel project, `metafora-dashboard`, Root
-Directory `frontend/dashboard`, same include-files-outside-the-root setting, and
-`fly secrets set SUPABASE_PUBLISHABLE_KEY` before the deploy that adds `/config`. Until then the
-dashboard runs from a laptop against the deployed backend, which is how it was built and is not
-the same thing.
+**Deploy — run on 2026-08-28.** The second Vercel project is named **`dashboard`**, not
+`metafora-dashboard` as this line used to promise — recorded because the wrong name is the kind of
+error that reads as a missing deploy rather than as a stale document. Root Directory
+`frontend/dashboard`, the same include-files-outside-the-root setting, and
+`fly secrets set SUPABASE_PUBLISHABLE_KEY` went in *before* the deploy that added `/config`, so the
+key reaches a browser from the running process and a rotation stays a secret change.
 
-**Done:** sign in, find the call, read its transcript with the cleared scans — done locally, on
-2026-08-28, against the live record: a call driven through the gate produced a cleared scan and a
-hit, and both render on the turn they ran on.
+Checked through the deployed URL rather than from a laptop, which is the distinction this section
+used to be drawing: a deep link answers 200 through `vercel.json`'s fallback, `/api/config` names
+the project through the rewrite, and `/api/interviews` is still 401 without a token — the read
+surface is shut through the proxy and not only at the origin. `scripts/smoke.sh` gained the
+assertion that would have caught the other half: test 2 fails a deploy whose `/config` carries an
+empty publishable key, because a box missing it boots happily, passes the health check, and fails
+for the first time in front of a clinician looking at a sign-in screen.
+
+**Done:** sign in, find the call, read its transcript with the cleared scans — on 2026-08-28,
+against the live record: a call driven through the gate produced a cleared scan and a hit, and both
+render on the turn they ran on. First from a laptop against the deployed backend, then through the
+deployed dashboard itself.
 
 ---
 

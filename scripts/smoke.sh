@@ -13,7 +13,7 @@
 # that gets skipped in CI, and the assertions below are the ones that matter
 # without one. `scripts/auth.sh` covers the authenticated half by hand.
 #
-# Test 2 starts a real session, which costs one LiveKit room and one opening
+# Test 3 starts a real session, which costs one LiveKit room and one opening
 # utterance of Groq TTS. That is the price of proving the deploy works rather
 # than proving the process is running, and it is the only assertion here that
 # exercises Groq, LiveKit and Postgres in one go. It ends the session it starts.
@@ -43,7 +43,26 @@ echo "$HEALTH" | grep -q '"ok":true'   || fail "GET /health is not ok: $HEALTH"
 echo "$HEALTH" | grep -q '"auth":true' || fail "auth is not configured — SUPABASE_URL did not arrive: $HEALTH"
 pass "/health · $HEALTH"
 
-# ─── 2 · a call can actually start ───────────────────────────────────────────
+# ─── 2 · a browser can be told where to sign in ──────────────────────────────
+#
+# `auth: true` above says this process can *verify* a clinician's token. It says
+# nothing about whether one can be obtained, and that needs the publishable key
+# — which is deliberately not in `config.py`'s `_problems()`, so a deployment
+# missing it boots happily, passes test 1, and fails for the first time in front
+# of a clinician looking at a sign-in screen.
+#
+# The assertion is on the key rather than on the status, because 503 here is a
+# considered answer and not a crash: a `curl -f` alone would read a correctly
+# refusing box and a correctly configured one as the same shape of failure.
+CONFIG="$(curl -fsS --max-time 10 "$BASE/config")" \
+  || fail "GET /config did not answer 200 — the dashboard cannot sign anyone in"
+echo "$CONFIG" | grep -q '"supabaseUrl":"http' \
+  || fail "GET /config names no project: $CONFIG"
+echo "$CONFIG" | grep -q '"supabasePublishableKey":"[^"]' \
+  || fail "GET /config carries an empty publishable key: $CONFIG"
+pass "/config · the dashboard is handed a project and a key"
+
+# ─── 3 · a call can actually start ───────────────────────────────────────────
 #
 # Groq (the opening line), LiveKit (the room and the join) and Postgres (the
 # claimed row) all in one request. If this passes, the deploy is real.
@@ -68,11 +87,11 @@ fi
 curl "${END_ARGS[@]}" >/dev/null || fail "POST /session/$SESSION_ID/end failed — the call is still running"
 pass "POST /session/$SESSION_ID/end"
 
-# ─── 3 · the clinical routes are still shut ──────────────────────────────────
+# ─── 4 · the clinical routes are still shut ──────────────────────────────────
 #
 # The one assertion here that is about safety rather than function. A deploy
 # that silently opens the read surface looks completely healthy from tests 1
-# and 2.
+# to 3.
 CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/interviews")"
 [ "$CODE" = "401" ] || fail "GET /interviews with no token returned $CODE, expected 401"
 pass "GET /interviews · 401 without a token"

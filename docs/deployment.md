@@ -64,7 +64,7 @@ if this ever carries a real patient, §2 is the paragraph to revisit first.
 | Piece | Where | Cost |
 |---|---|---|
 | `frontend/call` | Vercel — `metafora-call`, static Vite build, Root Directory `frontend/call` | free |
-| `frontend/dashboard` | Vercel — `metafora-dashboard`, static Vite build, Root Directory `frontend/dashboard` · **built, project not yet created** | free |
+| `frontend/dashboard` | Vercel — `dashboard`, static Vite build, Root Directory `frontend/dashboard` | free |
 | LiveKit | LiveKit Cloud, free tier | free |
 | backend (FastAPI + Pipecat) | Fly.io — `metafora`, one `shared-cpu-1x` / 1 GB machine in `lhr`, **always-on** | ~$6/mo |
 
@@ -74,12 +74,17 @@ scanned before generation, both passes firing, two fields captured into `clinica
 sentence is the whole of §6's argument, so it is worth recording that it is now a fact rather
 than a plan.
 
-**The clinician portal is built and not yet up.** Phase 4 runs against the deployed backend from
-a laptop, which is how it was developed and is not the same as being deployed. Three things, in
-this order: `fly secrets set SUPABASE_PUBLISHABLE_KEY` (before the deploy that adds `/config`, or the
-route answers 503 to a dashboard that is otherwise fine), the second Vercel project, and a
-sign-in against `metafora.fly.dev` from the Vercel URL rather than through the Vite proxy — which
-is the first time the rewrite, and not the proxy, is what carries `/api`.
+**The clinician portal went up on 2026-08-28**, at
+**https://dashboard-jet-xi-s5bpftmjnx.vercel.app**. The three things happened in the order this
+paragraph used to prescribe: `fly secrets set SUPABASE_PUBLISHABLE_KEY` first (before the deploy
+that adds `/config`, or the route answers 503 to a dashboard that is otherwise fine), then the
+second Vercel project, then a sign-in from the Vercel URL rather than through the Vite proxy —
+the first time the rewrite, and not the proxy, is what carries `/api`. The project is named
+**`dashboard`**; `metafora-dashboard` was the name planned here and never the one created.
+
+What that last step proves and a laptop could not: a deep link answers 200 through the SPA
+fallback, `/api/config` names the project through the rewrite, and `/api/interviews` is 401
+without a token — the read surface is shut through the proxy and not only at the origin.
 
 **1 GB minimum, and no scale-to-zero.** A 512 MB tier will not hold onnxruntime + Silero +
 SmartTurn. `min_machines_running = 1`: a cold link that shows a spinner while Python imports
@@ -283,5 +288,6 @@ the post-call queue after the MVP, pointed at work that genuinely needs a queue.
 As of 2026-08-27, everything up to and including **deploy** is done. Two things were deliberately
 left undone rather than forgotten: `SENTRY_DSN` is unset, so a failure in production is visible
 only in `flyctl logs`, and the Groq-side spend limit that §3 argues is the real ceiling is not yet
-set. The dashboard is next, and it is the first consumer of `reads.py` — which is to say the first
-time the auth work has anything to be authorised *for*.
+set. The dashboard was next, and it is the first consumer of `reads.py` — which is to say the
+first time the auth work has anything to be authorised *for*. As of 2026-08-28 it is built and
+deployed too (§3), and the next thing is dispatch: the screen that *writes* an interview.
