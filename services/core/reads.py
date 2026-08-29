@@ -13,9 +13,13 @@ tables, and the dashboard never writes.
 
 from typing import Any
 
+from services.agent.safety import SEVERITY
 from services.core import db
 from shared.auth import CurrentUser
 from shared.contracts.models import (
+    ExperienceDay,
+    ExperienceRange,
+    ExperienceSummary,
     InterviewDetail,
     InterviewSummary,
     PatientSummary,
@@ -40,11 +44,15 @@ _SUMMARY_COLUMNS = """
     i.outcome,
     i.patient_id,
     p.first_name  as patient_first_name,
+    p.nhs_number  as patient_nhs_number,
+    p.date_of_birth as patient_date_of_birth,
     p.origin      as patient_origin,
     i.protocol_id,
     pr.label      as protocol_label,
     f.captured    as captured_fields,
-    f.total       as total_fields,
+    d.total       as total_fields,
+    g.flag_count,
+    g.worst_flag,
     i.scheduled_for,
     i.started_at,
     i.ended_at,
@@ -52,18 +60,54 @@ _SUMMARY_COLUMNS = """
 """
 
 #: The review table draws a "9/16 captured" meter on every row. Counting it
-#: here is one lateral join; counting it in the browser is a detail request per
-#: row. `coalesce` because an interview that never started has no results at
-#: all, and a null meter would render as a broken one.
-_SUMMARY_FROM = """
+#: here is two lateral joins; counting it in the browser is a detail request per
+#: row.
+#:
+#: The two halves of that meter come from different places on purpose. What was
+#: captured is a fact about the call, and only `clinical.results` knows it. How
+#: much there was to capture is a fact about the *protocol*, and the interview
+#: pins one — so the denominator is read from the version it pinned, not from
+#: how many result rows happen to exist. `clinical.results` is written when a
+#: call ends, so counting it on both sides meters a queued or running interview
+#: as 0/0: a meter that says the script is empty, when what it means is that
+#: nothing has been written down yet. 0 of 6 is the true statement.
+
+#: `safety.py`'s ranking, as a SQL ladder, generated from the dict itself so
+#: the two cannot drift. Which flag is "worst" is a clinical ordering, and it is
+#: written down in exactly one place.
+_BY_SEVERITY = "case e.payload ->> 'action' " + " ".join(
+    f"when '{action}' then {rank}" for action, rank in SEVERITY.items()
+) + " else -1 end"
+
+#: What the gate found, per interview. `transcript.events` holds a
+#: `safety.scanned` for every committed turn — including the ones that matched
+#: nothing, which are the evidence the gate ran — so the join unnests `hits` and
+#: counts what came out: a scan with an empty array contributes no rows, and a
+#: call the gate cleared end to end comes back 0 and null.
+#:
+#: Distinct rules rather than turns, because a patient who mentions their
+#: anticoagulant three times has raised one flag, not three.
+_SUMMARY_FROM = f"""
     from clinical.interviews i
     join clinical.patients  p  on p.id = i.patient_id
     join config.protocols   pr on pr.id = i.protocol_id
     left join lateral (
-        select coalesce(count(*) filter (where r.status = 'captured'), 0)::int as captured,
-               coalesce(count(*), 0)::int                                      as total
+        select (count(*) filter (where r.status = 'captured'))::int as captured
         from clinical.results r where r.interview_id = i.id
     ) f on true
+    left join lateral (
+        select count(*)::int as total
+        from jsonb_array_elements(pr.version -> 'script' -> 'sections') section,
+             jsonb_array_elements(section -> 'questions')               question
+    ) d on true
+    left join lateral (
+        select count(distinct hit)::int                                  as flag_count,
+               (array_agg(e.payload ->> 'action' order by {_BY_SEVERITY} desc))[1]
+                                                                        as worst_flag
+        from transcript.events e,
+             jsonb_array_elements_text(e.payload -> 'hits') hit
+        where e.interview_id = i.id and e.type = 'safety.scanned'
+    ) g on true
 """
 
 
@@ -139,7 +183,8 @@ async def patients(user: CurrentUser, *, limit: int | None = None) -> list[Patie
     """The caller's own list, plus the unowned demo rows, carrying `origin` so
     the two are distinguishable on the screen."""
     rows = await _pool().fetch(
-        "select p.id, p.first_name, p.origin, p.clinician_email, p.created_at, "
+        "select p.id, p.first_name, p.nhs_number, p.date_of_birth, "
+        "       p.origin, p.clinician_email, p.created_at, "
         "       count(i.id)::int as interview_count, max(i.created_at) as last_interview_at "
         "from clinical.patients p "
         "left join clinical.interviews i on i.patient_id = p.id "
@@ -150,3 +195,76 @@ async def patients(user: CurrentUser, *, limit: int | None = None) -> list[Patie
         clamp(limit),
     )
     return [PatientSummary.model_validate(dict(r)) for r in rows]
+
+
+#: How many days each range draws. The labels are the spec's
+#: (`docs/ux/clinical-dashboard.html`), and "all" means the fortnight the seed
+#: covers rather than all of time — there is no older data to mean anything else.
+_RANGE_DAYS: dict[ExperienceRange, int] = {"today": 1, "week": 7, "all": 14}
+
+#: Every response the caller may see, scoped by the same predicate as everything
+#: else here. A sentiment is not a clinical fact, but it is still keyed to a
+#: patient, and a read that skipped `OWNED_BY` because the payload looked
+#: harmless is exactly the read that is wrong later.
+_VISIBLE_RESPONSES = f"""
+    select x.sentiment, x.responded_at
+    from metrics.experience_responses x
+    join clinical.patients p on p.id = x.patient_id
+    where {OWNED_BY}
+"""
+
+
+def _stamp(day: Any) -> str:
+    return f"{day.day} {day:%b}"
+
+
+async def experience(user: CurrentUser, range_: ExperienceRange) -> ExperienceSummary:
+    """The patient-experience panel.
+
+    The window ends at the newest response rather than at `now()`. Nothing
+    writes this table — the rows are a seed — so anchoring on the clock would
+    draw an empty chart the moment the deployment outlived its own migration,
+    and an empty chart is not more honest than a dated one. What keeps it honest
+    is `scope`, which names the fortnight instead of calling it today.
+    """
+    size = _RANGE_DAYS[range_]
+    rows = await _pool().fetch(
+        f"""
+        with visible as ({_VISIBLE_RESPONSES}),
+             anchor as (select max(responded_at)::date as day from visible),
+             span as (
+                 select generate_series(a.day - ($2::int - 1), a.day, interval '1 day')::date as day
+                 from anchor a where a.day is not null
+             )
+        select s.day,
+               count(v.sentiment) filter (where v.sentiment = 'positive')::int as positive,
+               count(v.sentiment) filter (where v.sentiment = 'neutral')::int  as neutral,
+               count(v.sentiment) filter (where v.sentiment = 'negative')::int as negative
+        from span s
+        left join visible v on v.responded_at::date = s.day
+        group by s.day
+        order by s.day
+        """,
+        user.email,
+        size,
+    )
+
+    days = [
+        ExperienceDay(
+            # Fourteen weekday names in a row are unreadable, so the fortnight
+            # is labelled by date — the same rule the browser used to apply.
+            label=str(r["day"].day) if size > 7 else f"{r['day']:%a}",
+            positive=r["positive"],
+            neutral=r["neutral"],
+            negative=r["negative"],
+        )
+        for r in rows
+    ]
+    if not days:
+        return ExperienceSummary(days=[], scope="no responses yet")
+    if size == 1:
+        return ExperienceSummary(days=days, scope=f"responses on {_stamp(rows[0]['day'])}")
+    return ExperienceSummary(
+        days=days,
+        scope=f"responses per day · {_stamp(rows[0]['day'])} – {_stamp(rows[-1]['day'])}",
+    )

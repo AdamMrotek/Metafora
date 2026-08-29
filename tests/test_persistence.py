@@ -56,11 +56,15 @@ async def test_a_seeded_protocol_is_readable_back_as_the_object(live_db):
 # ─── dispatch ────────────────────────────────────────────────────────────────
 
 
-async def test_resolving_writes_a_demo_patient_and_claims_the_interview(live_db):
+async def test_resolving_attaches_to_a_roster_patient_and_claims_the_interview(live_db):
+    """A visitor takes the call *as* one of the seeded ten rather than becoming
+    an eleventh person. That is what keeps `clinical.patients` a caseload and
+    not a visitor log (deployment.md §4, blocker 6)."""
+    before = await live_db.fetchval("select count(*) from clinical.patients")
     interview = await resolve_interview()
 
     row = await live_db.fetchrow(
-        "select i.status, i.started_at, p.origin, p.first_name "
+        "select i.status, i.started_at, p.origin, p.first_name, p.nhs_number, p.date_of_birth "
         "from clinical.interviews i join clinical.patients p on p.id = i.patient_id "
         "where i.id = $1",
         interview.id,
@@ -70,6 +74,10 @@ async def test_resolving_writes_a_demo_patient_and_claims_the_interview(live_db)
     # The column that lets a dashboard tell a demo visitor from a real caseload.
     assert row["origin"] == "demo"
     assert row["first_name"] == interview.patient.first_name
+    # A seeded identity is what makes a demo row a roster row.
+    assert row["nhs_number"].startswith("999")
+    assert row["date_of_birth"] is not None
+    assert await live_db.fetchval("select count(*) from clinical.patients") == before
 
 
 async def test_an_interview_is_claimed_exactly_once(live_db):
@@ -80,7 +88,13 @@ async def test_an_interview_is_claimed_exactly_once(live_db):
 
 
 async def test_two_callers_at_once_get_two_rows(live_db):
-    """The roadmap's own Phase 1 acceptance line."""
+    """The roadmap's own Phase 1 acceptance line — two *interviews*.
+
+    Two patients is no longer the property and must not be asserted: the roster
+    is drawn from at random, so two visitors landing on the same person is the
+    shared caseload working, not a collision. What still cannot happen is two
+    callers sharing one interview.
+    """
     a, b = await asyncio.gather(resolve_interview(), resolve_interview())
 
     rows = await live_db.fetch(
@@ -88,7 +102,7 @@ async def test_two_callers_at_once_get_two_rows(live_db):
         [a.id, b.id],
     )
     assert len(rows) == 2
-    assert len({r["patient_id"] for r in rows}) == 2
+    assert a.id != b.id
 
 
 # ─── transcript.events ───────────────────────────────────────────────────────

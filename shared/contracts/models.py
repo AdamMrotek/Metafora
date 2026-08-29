@@ -15,7 +15,7 @@ the backend consumes TypeScript any more, so the direction of generation
 reversed.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -236,15 +236,35 @@ class InterviewSummary(CamelModel):
     outcome: str | None
     patient_id: str
     patient_first_name: str
+    #: The patient's identity, as `clinical.patients` holds it. Null for a row
+    #: this product created itself — the intake asks for a first name, and a
+    #: real deployment carries the rest across at dispatch. On the summary
+    #: rather than behind a detail fetch because the review table draws a
+    #: masked NHS number on every line.
+    patient_nhs_number: str | None
+    patient_date_of_birth: date | None
     patient_origin: PatientOrigin
     protocol_id: str
     protocol_label: str
-    #: How much of the script the call actually got through, counted from
-    #: `clinical.results`. On the row rather than behind a second request
-    #: because the review table draws a progress meter per line, and one
-    #: lateral join is cheaper than a detail fetch per row.
+    #: How much of the script the call actually got through. `captured_fields`
+    #: is counted from `clinical.results`; `total_fields` from the questions the
+    #: pinned protocol declares, because a call that has not ended yet has no
+    #: result rows and 0/0 would read as an empty script. On the row rather than
+    #: behind a second request because the review table draws a progress meter
+    #: per line, and one lateral join is cheaper than a detail fetch per row.
     captured_fields: int
     total_fields: int
+    #: How many distinct red flags the gate matched across the whole call, and
+    #: the most serious action any of them carried. Null and zero mean the same
+    #: thing said twice: the gate ran on every turn and nothing tripped it.
+    #:
+    #: `outcome` only distinguishes the flag that *stopped* the call
+    #: (`end_call` → `safety`). An `urgent_escalate` or a `soft_review` lets the
+    #: conversation finish, so without these two fields a flagged call and a
+    #: clean one are the same row, and the clinician's own summary cannot tell
+    #: them apart. That is the number the dashboard counts.
+    flag_count: int
+    worst_flag: RedFlagAction | None
     scheduled_for: datetime | None
     started_at: datetime | None
     ended_at: datetime | None
@@ -325,9 +345,49 @@ class PatientSummary(CamelModel):
 
     id: str
     first_name: str
+    #: Seeded, and only ever from the range NHS England reserves for test data —
+    #: `clinical.patients` has a CHECK that will not hold anything else. Null for
+    #: a row this product created itself.
+    nhs_number: str | None
+    date_of_birth: date | None
     origin: PatientOrigin
     #: Null for a demo visitor — nobody was dispatched a call to them.
     clinician_email: str | None
     interview_count: int
     last_interview_at: datetime | None
     created_at: datetime
+
+
+# ─── patient experience ──────────────────────────────────────────────────────
+#
+# What `GET /experience` returns. No survey collects this — the rows are seeded
+# by `supabase/migrations/*_experience.sql` — but the query, the scoping and the
+# shape are the real ones, so the day a survey exists only the writer is new.
+
+ExperienceRange = Literal["today", "week", "all"]
+
+
+class ExperienceDay(CamelModel):
+    """One bar of the chart."""
+
+    #: Already formatted for the axis, because the window is chosen server-side
+    #: and the browser has no way to know whether it is drawing weekdays or
+    #: dates without being told twice.
+    label: str
+    positive: int
+    neutral: int
+    negative: int
+
+
+class ExperienceSummary(CamelModel):
+    """The panel, in one request.
+
+    `scope` is the caption under the chart and it names dates rather than saying
+    "today", because the window anchors on the newest response in the table
+    rather than on the clock — seeded data goes stale, and a chart that claims
+    to be today when it is drawing last spring is the lie this whole stage was
+    about removing.
+    """
+
+    days: list[ExperienceDay]
+    scope: str

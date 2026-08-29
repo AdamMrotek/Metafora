@@ -49,6 +49,8 @@
 .stat__n{font-size:2.125rem; font-weight:600; line-height:.95; letter-spacing:-.045em; font-variant-numeric:tabular-nums}
 .stat__l{font-size:var(--t-2xs); text-transform:uppercase; letter-spacing:.09em; color:var(--fg-4); white-space:nowrap}
 .stat--muted .stat__n{color:var(--fg-4)}
+.stat--flag .stat__n{color:var(--warn-fg)}
+.stat--urgent .stat__n{color:var(--danger-fg)}
 .stat__n em{font-style:normal; font-size:var(--t-sm); font-weight:500; letter-spacing:0; color:var(--fg-4); margin-left:6px}
 .panel{background:var(--surface); border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
 .ver{font-family:var(--font-mono); font-size:var(--t-2xs); color:var(--fg-4); border:1px solid var(--line); border-radius:var(--r-xs); padding:0 5px}

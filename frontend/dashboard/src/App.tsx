@@ -60,7 +60,10 @@ function Chrome({ account, onSignOut }: { account: Account; onSignOut: () => voi
         </a>
       </nav>
       <span className="grow" />
-      <span className="demo-chip" title="Synthetic data. Some of what is drawn is illustrative until dispatch and the signature ledger are built.">
+      <span
+        className="demo-chip"
+        title="Synthetic patients, on NHS test numbers. Three things are still drawn rather than recorded: the referral reason, the consent chip and the ledger hashes."
+      >
         demo data
       </span>
       <span className="chrome__me">

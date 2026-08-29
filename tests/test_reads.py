@@ -54,6 +54,19 @@ async def live_db(pool):
         db.configure(None)
 
 
+async def a_response_for(pool, patient_id: str, *, days_ago: int = 0) -> None:
+    """One experience response, which nothing in the application writes — the
+    rows are a migration's seed, so a test that wants one inserts it."""
+    await pool.execute(
+        "insert into metrics.experience_responses (id, patient_id, sentiment, responded_at) "
+        "values ($1, $2, 'positive', now() - ($3::int * interval '1 day')) "
+        "on conflict (id) do nothing",
+        f"xr_test_{patient_id}_{days_ago}",
+        patient_id,
+        days_ago,
+    )
+
+
 async def a_patient_of(pool, email: str | None, *, first_name: str = "Nadia") -> str:
     """One dispatched patient, owned by `email` — or unowned, which is what a
     demo visitor is."""
@@ -183,15 +196,21 @@ async def test_the_row_carries_how_much_of_the_script_was_captured(live_db):
     assert (detail.interview.captured_fields, detail.interview.total_fields) == (1, 2)
 
 
-async def test_an_interview_with_no_results_yet_meters_zero(live_db):
-    """`clinical.results` is written when the call ends, so a running one has no
-    rows at all. `coalesce` in the join is why that is 0/0 and not a null the
-    browser would render as a broken meter."""
+async def test_an_interview_with_no_results_yet_meters_against_the_script(live_db):
+    """`clinical.results` is written when the call ends, so a call that has not
+    ended has no rows at all. The denominator still has to be right: it comes
+    from the protocol the interview pinned, so this is 0/2 — nothing captured
+    out of two declared questions — and not 0/0, which reads as an empty script.
+    """
     interview = await resolve_interview()
+    declared = sum(
+        len(section.questions)
+        for section in PROTOCOLS[interview.protocol_id].script.sections
+    )
 
     row = next(r for r in await reads.interviews(user()) if r.id == interview.id)
 
-    assert (row.captured_fields, row.total_fields) == (0, 0)
+    assert (row.captured_fields, row.total_fields) == (0, declared) == (0, 2)
 
 
 async def test_the_review_table_is_bounded(live_db):
@@ -323,3 +342,86 @@ async def test_a_patient_with_no_interviews_counts_zero(live_db):
 
     assert row.interview_count == 0
     assert row.last_interview_at is None
+
+
+# ─── patient identity ────────────────────────────────────────────────────────
+
+
+async def test_the_summaries_carry_the_identity_the_dashboard_draws(live_db):
+    """NHS number and date of birth come down with the row. They used to be
+    invented in the browser from the patient id; the header and the review
+    table read them here now, which is the whole of Phase 5·0."""
+    interview = await resolve_interview()
+
+    row = next(r for r in await reads.interviews(user(ALICE)) if r.id == interview.id)
+    patient = next(p for p in await reads.patients(user(ALICE)) if p.id == interview.patient.id)
+
+    assert row.patient_nhs_number is not None
+    assert row.patient_nhs_number.startswith("999")
+    assert row.patient_date_of_birth is not None
+    assert patient.nhs_number == row.patient_nhs_number
+    assert patient.date_of_birth == row.patient_date_of_birth
+
+
+async def test_a_patient_without_an_identity_reads_as_null_rather_than_missing(live_db):
+    """A dispatched patient has a first name and nothing else, and the screen
+    has to draw that — an em dash, not a crash."""
+    patient = await a_patient_of(live_db, ALICE, first_name="Ada")
+
+    row = next(p for p in await reads.patients(user(ALICE)) if p.id == patient)
+
+    assert row.nhs_number is None
+    assert row.date_of_birth is None
+
+
+# ─── patient experience ──────────────────────────────────────────────────────
+#
+# The scratch database has the migrations applied, so the seeded roster and its
+# fortnight of responses are present and unowned — visible to everyone, which is
+# the point of them. Every assertion below is written to hold *on top of* that
+# rather than to pretend it is not there.
+
+
+async def test_experience_counts_the_responses_it_can_see(live_db):
+    mine = await a_patient_of(live_db, ALICE, first_name="Ada")
+    await a_response_for(live_db, mine)
+
+    panel = await reads.experience(user(ALICE), "today")
+
+    assert len(panel.days) == 1
+    assert panel.days[0].positive >= 1
+    assert "responses on" in panel.scope
+
+
+async def test_experience_is_scoped_like_everything_else_here(live_db):
+    """A sentiment is not a clinical fact, which is exactly why a read that
+    skipped `OWNED_BY` because the payload looked harmless would go unnoticed."""
+    his = await a_patient_of(live_db, BOB, first_name="Bruno")
+    await a_response_for(live_db, his)
+
+    before = sum(d.positive for d in (await reads.experience(user(ALICE), "all")).days)
+    await a_response_for(live_db, his, days_ago=1)
+    after = sum(d.positive for d in (await reads.experience(user(ALICE), "all")).days)
+
+    assert before == after
+    assert sum(d.positive for d in (await reads.experience(user(BOB), "all")).days) >= 2
+
+
+async def test_the_window_ends_at_the_newest_response_and_zero_fills_behind_it(live_db):
+    """Nothing writes this table, so anchoring on `now()` would draw an empty
+    chart the moment the deployment outlived its own seed. Anchoring on the data
+    means the days behind the newest one can be empty — and an empty day is a
+    zero bar, because dropping it silently rescales the axis.
+
+    Owned by Bob so the moved anchor stays out of Alice's tests above.
+    """
+    his = await a_patient_of(live_db, BOB, first_name="Bruno")
+    await a_response_for(live_db, his, days_ago=-30)
+
+    panel = await reads.experience(user(BOB), "week")
+
+    assert len(panel.days) == 7
+    assert panel.days[-1].positive >= 1
+    # The six days before it are past the end of the seed and hold nothing.
+    assert all(d.positive + d.neutral + d.negative == 0 for d in panel.days[:-1])
+    assert " – " in panel.scope

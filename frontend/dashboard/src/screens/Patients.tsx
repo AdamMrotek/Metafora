@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { PatientSummary } from '@metafora/contracts';
 import { historyOf, isOpen, useRecord } from '../data.tsx';
-import * as demo from '../demo.ts';
-import { relative, stamp } from '../format.ts';
+import { dob, nhsMasked, relative, stamp } from '../format.ts';
 import { Link, navigate } from '../router.tsx';
 
 /**
@@ -23,12 +22,15 @@ export function Patients() {
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
+    // NHS numbers are read aloud and written down in threes, so the spaces a
+    // clinician types are theirs and not the record's.
+    const digits = needle.replace(/\D/g, '');
     return patients
       .filter(
         (p) =>
           !needle ||
           p.firstName.toLowerCase().includes(needle) ||
-          demo.nhsNumber(p.id).toLowerCase().includes(needle),
+          (digits !== '' && (p.nhsNumber ?? '').includes(digits)),
       )
       .sort((a, b) => (b.lastInterviewAt ?? '').localeCompare(a.lastInterviewAt ?? ''));
   }, [patients, query]);
@@ -116,15 +118,15 @@ function Row({ patient }: { patient: PatientSummary }) {
   // most recent interview — which is what someone reaching for the row wants
   // nine times in ten.
   const href = last ? `/interviews/${last.id}` : undefined;
-  const dob = demo.dateOfBirth(patient.id);
+  const born = dob(patient.dateOfBirth);
 
   return (
     <tr data-href={href} onClick={() => href && navigate(href)}>
       <td>
         <span className="who">{patient.firstName}</span>
         <span className="sub mono">
-          {demo.nhsNumber(patient.id)} · {dob.label}
-          {patient.origin === 'demo' && ' · demo visitor'}
+          {nhsMasked(patient.nhsNumber)} · {born.label}
+          {patient.origin === 'demo' && ' · demo patient'}
         </span>
       </td>
       <td>

@@ -3,7 +3,7 @@ import type { InterviewDetail, ResultField } from '@metafora/contracts';
 import { get } from '../api.ts';
 import { historyOf, useRecord } from '../data.tsx';
 import * as demo from '../demo.ts';
-import { gap, outcome, stamp, statusPill } from '../format.ts';
+import { dob, gap, nhsMasked, outcome, stamp, statusPill } from '../format.ts';
 import { Link } from '../router.tsx';
 import { lines } from '../transcript.ts';
 
@@ -53,7 +53,7 @@ export function Interview({ id }: { id: string }) {
   const said = outcome(row);
   const pill = statusPill(row);
   const history = historyOf(interviews, row.patientId);
-  const dob = demo.dateOfBirth(row.patientId);
+  const born = dob(row.patientDateOfBirth);
 
   return (
     <>
@@ -71,7 +71,8 @@ export function Interview({ id }: { id: string }) {
         <span>
           <span className="dhead__n">{row.patientFirstName}</span>
           <span className="dhead__s">
-            {demo.nhsNumber(row.patientId)} · DOB {dob.label} · {dob.age}
+            {nhsMasked(row.patientNhsNumber)} · DOB {born.label}
+            {born.age !== null && ` · ${born.age}`}
           </span>
         </span>
         <span className="chips">
@@ -249,7 +250,7 @@ function Composer({ detail, summary }: { detail: InterviewDetail; summary: strin
   const row = detail.interview;
   const hashes = demo.hashes(row.id);
   const captured = detail.results.filter((r) => r.status === 'captured').length;
-  const dob = demo.dateOfBirth(row.patientId);
+  const born = dob(row.patientDateOfBirth);
 
   return (
     <div className="cmp">
@@ -258,7 +259,8 @@ function Composer({ detail, summary }: { detail: InterviewDetail; summary: strin
         <span>
           <span className="fld__l">Issued summary · composed from the record</span>
           <span className="fld__v fld__v--ro">
-            {dob.age}-year-old, {row.protocolLabel.toLowerCase()} for {demo.referral(row.patientId)}.{' '}
+            {born.age !== null && `${born.age}-year-old, `}
+            {row.protocolLabel.toLowerCase()} for {demo.referral(row.patientId)}.{' '}
             {summary}
             {row.endedAt ? ` at ${stamp(row.endedAt)}` : ''}; {captured} of {detail.results.length}{' '}
             declared items captured.

@@ -23,7 +23,8 @@ C_OFF := \033[0m
 
 .PHONY: help setup install dev api sfu web stop restart ports \
         check test lint typecheck imports build contracts e2e dash \
-        logs latency safety doctor clean guard-env
+        logs latency safety doctor clean guard-env \
+        sleep wake fly-status guard-fly
 
 ## ---- running ---------------------------------------------------------------
 
@@ -147,7 +148,63 @@ clean: ## Remove caches and build output (session logs are kept)
 	rm -rf .pytest_cache .ruff_cache frontend/call/dist frontend/dashboard/dist
 	find . -name __pycache__ -type d -not -path './.venv/*' -not -path './node_modules/*' -prune -exec rm -rf {} +
 
+## ---- fly.io ----------------------------------------------------------------
+#
+# The machine bills per second it runs, and most seconds nobody is calling. So
+# it is switched off by hand, between demos, and switched back on before the
+# next one. Deliberately by hand: `fly.toml` keeps both `auto_stop_machines`
+# and `auto_start_machines` off, because neither half of that decision can be
+# made by the proxy. It cannot stop us safely — a call in progress is outbound
+# to LiveKit on both ends, so a machine four minutes into an interview looks
+# to the proxy like one that has served nothing since `POST /session`, and it
+# would hang up on a patient mid-sentence. And once nothing stops us
+# automatically, nothing needs to start us automatically either.
+#
+# The cost of that symmetry is that `make sleep` is a real off switch: the app
+# is *down*, and stays down until `make wake`. Someone who follows the link
+# meanwhile gets an error, not a slow page. Sleep it when nobody has the link;
+# wake it before anyone does. `make fly-status` if you are unsure which it is.
+#
+# Stopping is a SIGTERM, which is the same drain a deploy does — every call in
+# progress hears the assistant sign off (kill_timeout = 30s in fly.toml).
+
+FLY_APP  ?= metafora
+FLY_HOST ?= $(FLY_APP).fly.dev
+
+sleep: guard-fly ## Stop the fly.io machines — the app is down until `make wake`
+	@ids=$$(flyctl machines list --app $(FLY_APP) --json | jq -r '.[].id'); \
+	test -n "$$ids" || { echo "  no machines on $(FLY_APP)"; exit 0; }; \
+	for id in $$ids; do \
+	  printf '  stopping %s ' "$$id"; \
+	  flyctl machine stop "$$id" --app $(FLY_APP) >/dev/null && echo "ok" || { echo "failed"; exit 1; }; \
+	done; \
+	printf '%b\n' "$(C_DIM)stopped — https://$(FLY_HOST) is down until: make wake$(C_OFF)"
+
+wake: guard-fly ## Start the fly.io machines and wait for /health (run before a demo)
+	@ids=$$(flyctl machines list --app $(FLY_APP) --json | jq -r '.[].id'); \
+	test -n "$$ids" || { echo "  no machines on $(FLY_APP) — deploy first"; exit 1; }; \
+	for id in $$ids; do \
+	  printf '  starting %s ' "$$id"; \
+	  flyctl machine start "$$id" --app $(FLY_APP) >/dev/null && echo "ok" || { echo "failed"; exit 1; }; \
+	done; \
+	printf '  waiting for https://$(FLY_HOST)/health '; \
+	for i in $$(seq 1 60); do \
+	  if curl -fsS --max-time 5 "https://$(FLY_HOST)/health" >/dev/null 2>&1; then \
+	    printf '\n'; printf '%b\n' "$(C_DIM)up: https://$(FLY_HOST)$(C_OFF)"; exit 0; \
+	  fi; \
+	  printf '.'; sleep 2; \
+	done; \
+	printf '\n  never became healthy — flyctl logs --app $(FLY_APP)\n'; exit 1
+
+fly-status: guard-fly ## What the fly.io machines are doing right now
+	@flyctl status --app $(FLY_APP)
+
 ## ---- internals -------------------------------------------------------------
+
+guard-fly:
+	@command -v flyctl >/dev/null 2>&1 || { echo "flyctl not installed — brew install flyctl"; exit 1; }
+	@command -v jq >/dev/null 2>&1 || { echo "jq not installed — brew install jq"; exit 1; }
+	@flyctl status --app $(FLY_APP) >/dev/null 2>&1 || { echo "cannot reach app $(FLY_APP) — flyctl auth login"; exit 1; }
 
 guard-env:
 	@test -f .env || { echo "missing .env — run: make setup"; exit 1; }

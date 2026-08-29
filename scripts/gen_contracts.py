@@ -81,8 +81,10 @@ def ts_type(annotation: str) -> str:
         "bool": "boolean",
         "None": "null",
         # ISO-8601 on the wire, because that is what pydantic serialises a
-        # datetime to and what `new Date(...)` on the other side accepts.
+        # datetime to and what `new Date(...)` on the other side accepts. A
+        # bare `date` is the same story one field shorter — "1951-03-14".
         "datetime": "string",
+        "date": "string",
         "object": "unknown",
         "Any": "unknown",
     }.get(a, a)

@@ -48,7 +48,10 @@ about this repo: `app.py`'s `lifespan` hands it its issuer, its keys and its dir
 **`supabase/migrations/`** — the schema, applied. Four schemas (`clinical`, `transcript`,
 `config`, `metrics`); `config.protocols` and `transcript.events` are append-only by trigger.
 `config.accounts` is **seeded by a migration, never by the application** — signing up must not be
-the same act as being granted a caseload. `make test-pg` runs them against a throwaway Postgres.
+the same act as being granted a caseload. Two more seeds, same rule: the ten-patient demo roster
+(`clinical.patients`, with a `nhs_number` CHECK that admits only NHS England's 999 test range, so
+this deployment *cannot* hold a real identifier) and `metrics.experience_responses`. `make test-pg`
+runs them against a throwaway Postgres.
 
 **`frontend/call/src/`** — patient portal. `App.tsx`, `call/useCall.ts` is the LiveKit hook,
 `portal.css` its components.
@@ -57,8 +60,10 @@ the same act as being granted a caseload. `make test-pg` runs them against a thr
 order that cannot be reshuffled: `/config` → Supabase client → `GET /me` → the app. `api.ts` is
 every read, `data.tsx` fetches the two lists once and shares them, `router.tsx` is forty lines
 over `pushState`, `screens/` is the three screens. **`demo.ts` is every value on the screen that
-no query produced** — NHS numbers, DOB, the ledger hashes, the experience chart — deterministic
-from a real id, and the only file Phase 5 has to delete. `dashboard.css` is
+no query produced** — now only the referral reason, the consent chip and the ledger hashes,
+deterministic from a real id, and the last file Phase 5 has to delete; NHS numbers, DOB and the
+experience chart became seeded rows in Phase 5·0 and are formatted by `format.ts` like any other
+real value. `dashboard.css` is
 `docs/ux/clinical-dashboard.html`'s `<style>` block, moved rather than reinterpreted.
 
 **`frontend/shared/tokens.css`** — tokens and base, and only those: the set all three surfaces

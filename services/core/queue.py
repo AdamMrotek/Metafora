@@ -6,8 +6,10 @@ token; a visitor to the public demo carries nothing; and both end at the same
 5 fills in the token branch against `clinical.invitations` and changes nothing
 else here, because the claim is already written.
 
-Without a database the mint is all that runs and the row is never written —
-`make dev` on a laptop with nothing provisioned behaves as it always did.
+With a database the demo arrival attaches its interview to one of the ten
+seeded roster patients rather than creating an eleventh person; without one the
+mint is all that runs and no row is written, so `make dev` on a laptop with
+nothing provisioned behaves as it always did.
 """
 
 import os
@@ -23,20 +25,34 @@ from shared.contracts.models import Patient, QueuedInterview
 #: the interview a clinician queued and this line goes away.
 DEMO_PROTOCOL_ID = os.environ.get("DEMO_PROTOCOL_ID", "proto_warmup_v1")
 
-#: A visitor to the public demo is a synthetic patient, not a shared one.
-#: Everyone being Alice was fine while the record evaporated; once the rows
-#: persist it fills `clinical.patients` with hundreds of identical people
-#: (deployment.md §4, blocker 6).
-#:
-#: What actually separates two rows is the patient id — the name is cosmetic,
-#: and two visitors drawing the same one is a real caseload, not a bug. The list
-#: is long enough that a dashboard is readable, and every name is short and
+#: The names the no-database path draws from. Every one is short and
 #: unambiguous out loud, because `_speak_opening` says it to the patient.
+#:
+#: With a database the roster in `supabase/migrations/*_patient_identity.sql`
+#: is used instead and this is not reached — a visitor takes a call *as* one of
+#: ten seeded people rather than becoming an eleventh. That is what stops the
+#: table filling with hundreds of one-call strangers (deployment.md §4,
+#: blocker 6), and it is why those ten have an NHS number and a date of birth
+#: while a minted one does not.
 DEMO_NAMES = (
     "Alice", "Ben", "Chloe", "Dev", "Erin", "Femi", "Greta", "Hari",
     "Iris", "Jonas", "Kira", "Leo", "Maya", "Nadia", "Omar", "Priya",
     "Quinn", "Rosa", "Sam", "Tara", "Umar", "Vera", "Wes", "Zoe",
 )
+
+
+#: Which demo rows a visitor may arrive as. A seeded identity *is* the
+#: definition of a roster patient — the ten rows the migration wrote are the
+#: only ones with an NHS number, and the per-visitor rows an older deployment
+#: already minted have none, so they keep their history and stop growing.
+#:
+#: `random()` rather than round-robin because the alternative is a counter
+#: somewhere, and ten rows read as a caseload whichever order they fill.
+ROSTER_PICK = """
+    select id, first_name from clinical.patients
+    where origin = 'demo' and nhs_number is not null
+    order by random() limit 1
+"""
 
 
 class UnknownInvitation(RuntimeError):
@@ -72,11 +88,19 @@ async def resolve_interview(token: str | None = None) -> QueuedInterview:
 
     pool = db.pool()
     async with pool.acquire() as conn, conn.transaction():
-        await conn.execute(
-            "insert into clinical.patients (id, first_name, origin) values ($1, $2, 'demo')",
-            interview.patient.id,
-            interview.patient.first_name,
-        )
+        roster = await conn.fetchrow(ROSTER_PICK)
+        if roster is not None:
+            interview = interview.model_copy(
+                update={"patient": Patient(id=roster["id"], first_name=roster["first_name"])}
+            )
+        else:
+            # A database with the schema but not the roster migration — an older
+            # deployment mid-upgrade. Mint as before rather than refuse the call.
+            await conn.execute(
+                "insert into clinical.patients (id, first_name, origin) values ($1, $2, 'demo')",
+                interview.patient.id,
+                interview.patient.first_name,
+            )
         await conn.execute(
             "insert into clinical.interviews (id, protocol_id, patient_id) values ($1, $2, $3)",
             interview.id,

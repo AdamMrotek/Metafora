@@ -270,6 +270,12 @@ them in. The chrome carries a `demo data` chip. Where a real column could fill a
 does: the third stat tile counts queued interviews rather than the invitation windows Phase 5
 will introduce, and the scheduled-calls card is real and empty.
 
+*Since Phase 5·0:* three of those slots got a real column after all. NHS numbers and dates of
+birth are seeded rows on `clinical.patients` — from the range NHS England reserves for test data,
+under a CHECK that refuses anything else — and the experience chart reads `metrics`. What is left
+in `demo.ts` is the consent chip, the referral context and the ledger hashes. See
+`docs/phase-5-roadmap.md`.
+
 Everything that writes is disabled rather than hidden — impression, disposition, Sign, Add
 patient, Deployments. A control that cannot honour what it offers is worse than one that plainly
 is not offering it yet, and the shape of the act is the argument the composer is making.

@@ -343,14 +343,15 @@ real rather than asserted — because a preserved seam nobody exercises is a cla
 | **Nothing medical in operational telemetry** | Vacuously — nothing writes telemetry | A metrics writer that accepts a closed set of typed fields | Unbuilt (roadmap §6+). The enforcement is the writer's signature, not a review | n/a |
 | **Audio is retained and deleted on a schedule** | No — nothing records audio | `store-media` plus a deletion schedule | Unbuilt (roadmap §6+) | n/a |
 | **A dropped call resumes** | No | Roadmap §6+ | The only part that is cheap now is the write fence — see §4 | n/a |
+| **No real patient identifier is held** | **Yes** | — | — | **`tests/test_seed_identity.py`**. `clinical.patients` carries a CHECK admitting only 999 000 0000 – 999 999 9999, the range NHS England reserves for test data; the test re-derives the Modulus 11 check digit on every seeded number and asserts a real one is refused. A clinical deployment drops that one constraint |
 
 **What consent is doing here: nothing.** No consent is captured, stored, or modelled anywhere in
 this system. An earlier version of this page listed it in `store-clinical`; it was never true, and
 on a demo where a stranger talks to a clinical agent, claiming a consent record you do not hold is
 worse than holding none.
 
-**The honest summary.** Five of the properties above are already true or close by configuration,
-and four of those have a proof sitting in the repo. One — patient speech reaching a third-party
+**The honest summary.** Six of the properties above are already true or close by configuration,
+and five of those have a proof sitting in the repo. One — patient speech reaching a third-party
 model — is a refactor, not a rewrite, and is unbuilt. The rest are unbuilt features that this
 page names so they are not discovered late. That distinction is the architecture; the demo is
 just where it currently points.

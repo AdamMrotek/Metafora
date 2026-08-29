@@ -1,8 +1,16 @@
 import { useMemo, useState } from 'react';
 import type { InterviewSummary } from '@metafora/contracts';
 import { useRecord } from '../data.tsx';
-import * as demo from '../demo.ts';
-import { activityAt, greeting, outcome, relative, stamp, statusPill, today } from '../format.ts';
+import {
+  activityAt,
+  greeting,
+  nhsMasked,
+  outcome,
+  relative,
+  stamp,
+  statusPill,
+  today,
+} from '../format.ts';
 import { Link, navigate } from '../router.tsx';
 import { Experience } from './Experience.tsx';
 
@@ -55,10 +63,25 @@ export function Dashboard() {
   const current = Math.min(page, pages - 1);
   const shown = rows.slice(current * PAGE, current * PAGE + PAGE);
 
-  const ready = interviews.filter((i) => i.status === 'completed').length;
-  const running = interviews.filter((i) => i.status === 'running').length;
-  const queued = interviews.filter((i) => i.status === 'queued').length;
   const urgent = interviews.filter((i) => i.outcome === 'safety').length;
+
+  // Three numbers, and they are the three errands — not a census of the list.
+  // Counting `status` here restated the column the table draws two inches
+  // below; counting the calls that came back clean, or the ones still out,
+  // filled the row with numbers nobody has to act on. What is left is work
+  // owed, worst first.
+  //
+  // A finished call falls in exactly one of them: the gate stopped it, or the
+  // gate found something and it ran on, or the gate found nothing and the
+  // script did not finish. Flags outrank a short script, because a flagged call
+  // is read either way.
+  const back = interviews.filter(
+    (i) => (i.status === 'completed' || i.status === 'abandoned') && i.outcome !== 'safety',
+  );
+  const flagged = back.filter((i) => i.flagCount > 0).length;
+  const incomplete = back.filter(
+    (i) => i.flagCount === 0 && i.capturedFields < i.totalFields,
+  ).length;
 
   return (
     <div className="page">
@@ -71,27 +94,27 @@ export function Dashboard() {
         </span>
       </div>
 
-      {/* The escalation count is deliberately absent: the band above already
-          carries it, with a clock. Two places for one number is two places to
-          disagree. */}
+      {/* The band above this screen carries the escalation too, with a clock,
+          and it is the thing that interrupts. This is the second reading: a
+          summary that runs "flagged · incomplete" and silently omits the most
+          serious category is a summary that reassures. It is a count of the
+          same rows, never a second source — both read `outcome`.
+
+          The spec's third tile is "Expiring · 48h", which counts invitation
+          windows. `clinical.invitations` is Phase 5, so the slot carries a
+          number that exists instead of one that does not. */}
       <div className="stats">
-        <span className="stat">
-          <span className="stat__n">{ready}</span>
-          <span className="stat__l">Review ready</span>
+        <span className="stat stat--urgent">
+          <span className="stat__n">{urgent}</span>
+          <span className="stat__l">Urgent</span>
+        </span>
+        <span className="stat stat--flag">
+          <span className="stat__n">{flagged}</span>
+          <span className="stat__l">Flagged</span>
         </span>
         <span className="stat">
-          <span className="stat__n">
-            {running}
-            {running > 0 && <em>on the line</em>}
-          </span>
-          <span className="stat__l">In progress</span>
-        </span>
-        {/* The spec's third tile is "Expiring · 48h", which counts invitation
-            windows. `clinical.invitations` is Phase 5, so the slot carries a
-            number that exists instead of one that does not. */}
-        <span className="stat stat--muted">
-          <span className="stat__n">{queued}</span>
-          <span className="stat__l">Queued</span>
+          <span className="stat__n">{incomplete}</span>
+          <span className="stat__l">Incomplete</span>
         </span>
       </div>
 
@@ -237,7 +260,7 @@ function Row({ row }: { row: InterviewSummary }) {
     >
       <td>
         <span className="who">{row.patientFirstName}</span>
-        <span className="sub mono">{demo.nhsNumber(row.patientId)}</span>
+        <span className="sub mono">{nhsMasked(row.patientNhsNumber)}</span>
       </td>
       <td>
         {row.protocolLabel} <span className="ver">{row.protocolId.split('_').pop()}</span>

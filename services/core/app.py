@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from services.core import db
+from services.core import db, seed
 from services.core.config import (
     ALLOWED_ORIGINS,
     ENV,
@@ -34,7 +34,7 @@ from services.core.config import (
     SUPABASE_URL,
 )
 from services.core.lifecycle import drain
-from services.core.routes import interviews, me, patients, session
+from services.core.routes import experience, interviews, me, patients, session
 from services.core.store import live_sessions
 from shared import auth
 from shared.contracts.models import PublicConfig
@@ -49,6 +49,9 @@ async def lifespan(app: FastAPI):
     # `config.protocols`, so nothing can be dispatched until it is populated.
     await db.connect()
     await db.seed_protocols()
+    # And the demo record on top of it — the seeded calls reference the
+    # protocols above, so this is the only order it can go in.
+    await seed.seed_demo_record(db.pool())
     if not db.enabled():
         logger.warning("no DATABASE_URL — this process forgets every call when it restarts")
     await _configure_auth()
@@ -167,6 +170,7 @@ app.add_middleware(
 app.include_router(session.router)
 app.include_router(interviews.router)
 app.include_router(patients.router)
+app.include_router(experience.router)
 app.include_router(me.router)
 
 

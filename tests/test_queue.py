@@ -18,8 +18,9 @@ def test_the_pure_suite_really_has_no_database():
 
 
 async def test_every_caller_gets_their_own_patient():
-    """Everyone being Alice was fine while the record evaporated. It stopped
-    being fine when the rows started to persist (deployment.md §4, blocker 6)."""
+    """With no database there is no roster to draw from, so the mint is the
+    whole answer and two visitors must not collide. The database path picks a
+    seeded person instead — `tests/test_persistence.py`."""
     a, b = await resolve_interview(), await resolve_interview()
 
     assert a.id != b.id

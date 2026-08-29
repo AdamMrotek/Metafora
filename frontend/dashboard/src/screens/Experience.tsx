@@ -1,13 +1,21 @@
-import { useMemo, useState } from 'react';
-import * as demo from '../demo.ts';
+import { useEffect, useState } from 'react';
+import type { ExperienceRange, ExperienceSummary } from '@metafora/contracts';
+import { get } from '../api.ts';
 
 /**
- * Patient experience — the one panel on this screen with no query behind it.
+ * Patient experience — a real read over invented answers.
  *
- * Nothing asks a patient how the interview went and nothing stores the answer;
- * the opt-in survey is on no roadmap phase. It is drawn because the spec's own
- * caption promises a chart that moves when the range changes, and the numbers
- * come from `demo.ts` — which is where every invented value in this app lives.
+ * Nothing asks a patient how the interview went; the opt-in survey is on no
+ * roadmap phase. What exists is `metrics.experience_responses`, seeded by a
+ * migration and read by `GET /experience` — scoped through the patient by the
+ * same predicate as the record itself, because a sentiment is not a clinical
+ * fact and that is exactly why it would have been easy to leave unscoped.
+ *
+ * So the query, the window and the shape are the real ones and only the answers
+ * are made up, which is a smaller lie than the loop in the browser this
+ * replaced. The caption says which fortnight it is drawing, because the seed
+ * ages and a chart that says "today" while drawing last spring is the thing
+ * this was fixing.
  *
  * The chart itself is the spec's, reimplemented rather than reinterpreted:
  * stacked counts, the total riding the cap so the values never depend on colour
@@ -36,9 +44,24 @@ function cap(x: number, y: number, w: number, h: number, radius: number): string
 }
 
 export function Experience() {
-  const [range, setRange] = useState<demo.Range>('week');
+  const [range, setRange] = useState<ExperienceRange>('week');
   const [hover, setHover] = useState<number | null>(null);
-  const { days, scope } = useMemo(() => demo.experience(range), [range]);
+  const [panel, setPanel] = useState<ExperienceSummary | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    get<ExperienceSummary>(`/experience?range=${range}`)
+      .then((value) => live && setPanel(value))
+      // The panel sits inside the dashboard; a failed read here must not take
+      // the review table down with it, so it degrades to an empty chart.
+      .catch(() => live && setPanel({ days: [], scope: 'unavailable' }));
+    return () => {
+      live = false;
+    };
+  }, [range]);
+
+  const days = panel?.days ?? [];
+  const scope = panel ? panel.scope : 'reading…';
 
   const totals = days.map((d) => d.positive + d.neutral + d.negative);
   const max = Math.max(...totals, 1);
@@ -59,7 +82,7 @@ export function Experience() {
           <h4 className="px__t">Patient experience</h4>
           <p className="px__s">
             Asked only of patients who opted in. It measures how the interview went, never the
-            patient. <b>Illustrative</b> — nothing collects this yet.
+            patient. <b>Seeded</b> — the read is real, no survey writes it yet.
           </p>
         </div>
         <div className="seg" role="group" aria-label="Time range">

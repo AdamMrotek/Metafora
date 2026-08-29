@@ -31,7 +31,7 @@ CLINICIAN = "clinician@example.test"
 #: Every route that reads the record. Parametrised rather than tested one at a
 #: time: "which routes are behind the door" is the property, and a route added
 #: to this list is a route the whole file is asserted against.
-GUARDED = ["/interviews", "/interviews/iv_anything", "/patients", "/me"]
+GUARDED = ["/interviews", "/interviews/iv_anything", "/patients", "/experience", "/me"]
 
 
 # ─── a signing key, and a key set served from memory ─────────────────────────

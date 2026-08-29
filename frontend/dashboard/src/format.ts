@@ -1,4 +1,4 @@
-import type { InterviewSummary } from '@metafora/contracts';
+import type { InterviewSummary, RedFlagAction } from '@metafora/contracts';
 
 /**
  * Turning rows into the sentences the spec writes.
@@ -66,12 +66,49 @@ function minutes(row: InterviewSummary): number | null {
 
 export type Outcome = { title: string; detail: string; urgent: boolean };
 
+/** What each action means to the person reading the table, rather than to the
+ *  gate that raised it. `end_call` is the only one that stops a call, and the
+ *  row it belongs to says so in its own words already. */
+const FLAG_WORDS: Record<RedFlagAction, string> = {
+  end_call: 'the call was stopped',
+  urgent_escalate: 'urgent escalation',
+  soft_review: 'flagged for review',
+  note_only: 'noted for the record',
+};
+
+/**
+ * The gate's finding, as a clause — or null when it found nothing, which is
+ * most calls and is itself the useful answer.
+ *
+ * A flag that did not end the call leaves no trace in `status` or `outcome`, so
+ * before this the row for a patient who said they were still on their
+ * anticoagulant and the row for a patient who raised nothing were the same row.
+ */
+export function flags(row: InterviewSummary): string | null {
+  if (!row.flagCount || !row.worstFlag) return null;
+  const n = row.flagCount === 1 ? '1 red flag' : `${row.flagCount} red flags`;
+  return `${n} · ${FLAG_WORDS[row.worstFlag]}`;
+}
+
+/** The sentence, and then what the gate found appended to it. Split in two so
+ *  every branch below picks up the flag clause without restating it — an
+ *  urgent flag on a call that ran to the end is exactly the case a branch
+ *  would forget. */
+export function outcome(row: InterviewSummary): Outcome {
+  const said = narrate(row);
+  const raised = flags(row);
+  // The safety row's own copy already says what stopped it; two sentences for
+  // one flag is two sentences to disagree.
+  if (!raised || row.outcome === 'safety') return said;
+  return { ...said, detail: `${said.detail} · ${raised}` };
+}
+
 /**
  * The Outcome column. `status` says how far it got and `outcome` says why it
  * stopped — the row needs both, because "abandoned / complete" is a call the
  * patient finished on a script the machine did not.
  */
-export function outcome(row: InterviewSummary): Outcome {
+function narrate(row: InterviewSummary): Outcome {
   const { capturedFields: got, totalFields: all } = row;
   const captured = all ? `${got} of ${all} declared items captured` : 'nothing captured yet';
   const ran = minutes(row);
@@ -125,6 +162,9 @@ export type PillKind = 'danger' | 'accent' | 'warn' | 'faint' | '';
 
 export function statusPill(row: InterviewSummary): { label: string; kind: PillKind } {
   if (row.outcome === 'safety') return { label: 'urgent review', kind: 'danger' };
+  // A completed call the gate flagged is not the same errand as a completed
+  // call it cleared, and the pill is what the eye reads first.
+  if (row.status === 'completed' && row.flagCount > 0) return { label: 'flagged', kind: 'warn' };
   if (row.status === 'completed') return { label: 'review ready', kind: 'accent' };
   if (row.status === 'running') return { label: 'in progress', kind: '' };
   if (row.status === 'queued') return { label: 'not started', kind: 'faint' };
@@ -137,3 +177,42 @@ export function statusPill(row: InterviewSummary): { label: string; kind: PillKi
  *  screens re-sort and filter client-side. */
 export const activityAt = (row: InterviewSummary): string =>
   row.endedAt ?? row.startedAt ?? row.scheduledFor ?? row.createdAt;
+
+/* ── patient identity ──────────────────────────────────────────────────────
+   Real values, formatted. An NHS number is seeded, from the range NHS England
+   reserves for test data, and held under a CHECK in `clinical.patients` that
+   will not accept anything else; a date of birth is a column. That is why they
+   are here rather than in `demo.ts`. */
+
+/** The spec's masked form — the last three digits only, which is what a
+ *  clinician actually scans a column for. The full number reaches the browser
+ *  because the patients search matches on it; the column does not show it. */
+export function nhsMasked(nhsNumber: string | null): string {
+  if (!nhsNumber) return 'NHS —';
+  return `NHS ···· ${nhsNumber.slice(-3)}`;
+}
+
+const BORN = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+/** A date of birth as the header draws it, and the age it implies.
+ *
+ *  UTC throughout: the column is a `date` and arrives as `1951-03-14`, so
+ *  parsing it in local time would move a birthday a day in either direction
+ *  depending on where the clinician is sitting. */
+export function dob(iso: string | null): { label: string; age: number | null } {
+  if (!iso) return { label: '—', age: null };
+  const born = new Date(`${iso}T00:00:00Z`);
+  const now = new Date();
+  const month = born.getUTCMonth();
+  const day = born.getUTCDate();
+  let age = now.getUTCFullYear() - born.getUTCFullYear();
+  if (now.getUTCMonth() < month || (now.getUTCMonth() === month && now.getUTCDate() < day)) {
+    age -= 1;
+  }
+  return { label: BORN.format(born), age };
+}

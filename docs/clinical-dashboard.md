@@ -89,13 +89,20 @@ timeline, and the escalation band, which counts and clocks real
 `outcome = 'safety'` rows and quotes the patient's own words from the turn the
 gate stopped on.
 
-**Illustrative — `frontend/dashboard/src/demo.ts`, and nowhere else.** NHS
-numbers, dates of birth, consent chips, the referral context in the issued
-summary, the composer's record hash and ledger head, and the whole
-patient-experience panel. This product has never collected demographics — a demo
-visitor gives a first name — and nothing asks a patient how the interview went.
-Each value is derived from a real id so it does not move between renders, and
-the file is deletable in one commit. The chrome carries a `demo data` chip.
+**Illustrative — `frontend/dashboard/src/demo.ts`, and nowhere else.** Three
+things: the consent chip, the referral context in the issued summary, and the
+composer's record hash and ledger head. Each is derived from a real id so it
+does not move between renders, and the file is deletable in one commit. The
+chrome carries a `demo data` chip naming exactly those three.
+
+**Seeded — synthetic, but queried.** NHS numbers, dates of birth and the
+patient-experience panel used to be in that list. Phase 5·0 moved them into the
+record: the numbers are seeded from 999 000 0000 – 999 999 9999, the range NHS
+England reserves for test data, under a CHECK that will not hold a real one, and
+the panel reads `metrics.experience_responses` through the same scope predicate
+as everything else. This product still collects only a first name, and nothing
+asks a patient how the interview went — what changed is that the invention is a
+migration the dashboard queries rather than a hash in the browser.
 
 **Deliberately inert until Phase 5.** Clinical impression, disposition, Sign,
 Add patient, the Deployments screen, and the band's own action. A control that
