@@ -39,6 +39,19 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # A machine missing a required secret dies at import, before it joins the
+      # pool, so blue/green can only report that the health check never passed.
+      # This asks the same question from outside and names the variable, before
+      # the image is built. `--no-project` because the script is stdlib-only.
+      - name: Preflight
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: uv run --no-project python scripts/preflight.py --app "$FLY_APP"
+
       # Where to go back to. Read before anything changes, because after the
       # deploy this answer is the broken one.
       - name: Remember what is running

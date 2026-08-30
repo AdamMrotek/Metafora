@@ -206,6 +206,24 @@ _DEV_LIVEKIT_CREDENTIALS = ("devkey", "secret")
 _DEV_INVITE_SECRET = "dev-invite-secret"
 
 
+#: The variables `_problems()` reads, for checks that run outside a boot.
+#: Each entry is satisfied by any one of its names — `LIVEKIT_PUBLIC_URL` has a
+#: second because it falls back to `LIVEKIT_URL`.
+#:
+#: Presence only; `_problems()` checks values, and Fly secrets cannot be read.
+#: `tests/test_config.py` keeps the two in step.
+REQUIRED_IN_PROD: tuple[tuple[str, ...], ...] = (
+    ("GROQ_API_KEY",),
+    ("LIVEKIT_API_KEY",),
+    ("LIVEKIT_API_SECRET",),
+    ("DATABASE_URL",),
+    ("SUPABASE_URL",),
+    ("INVITE_SECRET",),
+    ("PORTAL_URL",),
+    ("LIVEKIT_PUBLIC_URL", "LIVEKIT_URL"),
+)
+
+
 class ConfigError(RuntimeError):
     """Raised at import when a non-dev environment is misconfigured."""
 

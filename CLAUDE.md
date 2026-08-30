@@ -136,8 +136,10 @@ clinician's sign-in — which the dashboard's *browser* makes directly, with the
 Sentry for failures — which carries no part of the product by construction, because `app.py`
 gives it no request bodies and drops anything raised inside `services/agent/`.
 `GROQ_API_KEY` is the one env var `make dev` requires; `DATABASE_URL`, `SUPABASE_URL`,
-`PORTAL_URL` and `INVITE_SECRET` are all optional in dev and required outside it (`Dockerfile` + `fly.toml` deploy the backend, and
-`config.py` names every secret it refuses to boot without) — empty `DATABASE_URL` means JSONL on disk and an
+`PORTAL_URL` and `INVITE_SECRET` are all optional in dev and required outside it (`Dockerfile` +
+`fly.toml` deploy the backend, `config.py` names every secret it refuses to boot without in
+`REQUIRED_IN_PROD`, and `scripts/preflight.py` checks a Fly app against that list — `make
+preflight`, and a `deploy.yml` step before the build) — empty `DATABASE_URL` means JSONL on disk and an
 in-process store, empty `SUPABASE_URL` means the clinical routes refuse everyone with 503, which
 is a refusal and never an open door. `SUPABASE_PUBLISHABLE_KEY` is in neither list: it is read
 only by `/config`, and empty means the dashboard is told so rather than the box refusing to boot — a

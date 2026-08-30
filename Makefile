@@ -21,7 +21,7 @@ C_DASH := \033[33m
 C_DIM := \033[2m
 C_OFF := \033[0m
 
-.PHONY: help setup install dev api sfu web stop restart ports \
+.PHONY: help setup install dev api sfu web stop restart ports preflight \
         check test test-pg test-e2e lint typecheck imports build contracts e2e dash \
         logs latency safety doctor clean guard-env \
         sleep wake fly-status guard-fly
@@ -99,6 +99,8 @@ doctor: ## Check the prerequisites are in place
 	test -d .venv && printf '  \033[32mok\033[0m    %-16s\n' ".venv" || printf '  \033[31mmissing\033[0m %-13s run: make install\n' ".venv"; \
 	exit $$ok
 
+FLY_APP ?= metafora
+
 ## ---- checks ----------------------------------------------------------------
 
 check: test lint typecheck ## Everything CI runs except the schema (make test-pg) and browser (make test-e2e) tests
@@ -117,6 +119,9 @@ test-pg: ## Schema tests against a throwaway Postgres in Docker
 	@until docker exec metafora-pg pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
 	TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:55432/postgres \
 		uv run pytest -m postgres
+
+preflight: ## Does the deployed app hold every secret prod refuses to boot without?
+	uv run python scripts/preflight.py --app $(FLY_APP)
 
 lint: ## ruff
 	uv run ruff check .
