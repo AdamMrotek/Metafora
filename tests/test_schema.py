@@ -210,6 +210,36 @@ async def test_a_demo_patient_has_no_owner(db):
     assert row["clinician_email"] is None
 
 
+# ─── the acknowledgement ─────────────────────────────────────────────────────
+#
+# Phase 5b. Two columns rather than a table, so the only thing the schema can
+# still promise about them is who may be named in one.
+
+
+async def test_an_escalation_cannot_be_taken_by_an_account_nobody_granted(db):
+    """The same foreign key as `clinician_email`, for the same reason: "a named
+    clinician has this" is worth nothing if the name need not be one."""
+    await seed(db)
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await db.execute(
+            "update clinical.interviews set acknowledged_at = now(), "
+            "acknowledged_by = 'ghost@example.test' where id = 'iv_0001'"
+        )
+
+
+async def test_an_interview_starts_unacknowledged(db):
+    """Null is the whole of "nobody has taken this" — there is no fifth status,
+    so `status = 'completed'` with this column null is what "completed and also
+    flagged" means."""
+    await seed(db)
+
+    row = await db.fetchrow(
+        "select acknowledged_at, acknowledged_by from clinical.interviews where id = 'iv_0001'"
+    )
+    assert row["acknowledged_at"] is None
+    assert row["acknowledged_by"] is None
+
+
 # ─── clinical.invitations ────────────────────────────────────────────────────
 #
 # Phase 5a. Three constraints carry the whole of what a link is, and every one

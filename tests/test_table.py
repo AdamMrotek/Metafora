@@ -79,6 +79,24 @@ async def a_row(
     return interview_id
 
 
+async def a_red_flag_on(pool, interview_id: str) -> None:
+    """One `safety.scanned` carrying a red, which is what the `urgent` tile
+    counts since Phase 5b.
+
+    `outcome = 'safety'` alone no longer reaches it. That column is what the
+    gate *stopped*, and the tile is now "a red nobody has acknowledged" — a
+    fact about `transcript.events` and one column on the interview, so a row
+    that claims an outcome and logged no scan is a row nothing raised.
+    """
+    await pool.execute(
+        "insert into transcript.events (interview_id, session_id, seq, type, at, payload) "
+        "values ($1, $2, 1, 'safety.scanned', now(), $3) on conflict do nothing",
+        interview_id,
+        f"sess_tbl_{interview_id}",
+        {"blocked": True, "hits": ["rf_self_harm"], "action": "end_call"},
+    )
+
+
 def ids(page) -> list[str]:
     return [r.id for r in page.rows]
 
@@ -268,16 +286,20 @@ async def test_the_tiles_count_the_whole_scope_not_a_page(live_db):
     from the same fetch the table used, so the moment that fetch became one page
     they would have been counting a page and calling it the caseload."""
     for i in range(3):
-        await a_row(live_db, f"ov_{i}", status="abandoned", outcome="safety", minutes_ago=i)
+        made = await a_row(
+            live_db, f"ov_{i}", status="abandoned", outcome="safety", minutes_ago=i
+        )
+        await a_red_flag_on(live_db, made)
 
     page = await reads.interviews(user(), limit=1)
     overview = await reads.overview(user())
 
     assert len(page.rows) == 1
     assert overview.urgent >= 3
-    # And the band draws from a list that is not the page either.
-    assert len(overview.escalations) >= 3
-    assert all(r.outcome == "safety" for r in overview.escalations)
+    # And the band draws from a list that is not the page either — and states
+    # the same number, because both come from `UNACKNOWLEDGED_RED`.
+    assert len(overview.escalations) == overview.urgent >= 3
+    assert all(e.action in reads.RED_ACTIONS for e in overview.escalations)
 
 
 async def test_the_overview_carries_what_is_still_out(live_db):

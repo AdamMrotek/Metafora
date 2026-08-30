@@ -1,19 +1,20 @@
-"""The clinician's read of the record, and the two writes that queue a call.
+"""The clinician's read of the record, and the three writes onto it.
 
-Five routes, all behind `require_role`, and all handing the identity on to
-`reads.py` or `dispatch.py` rather than stopping at the door with it. The
-writes live here rather than in a router of their own so that they inherit the
-same standing guard the reads do: a file split by *audience* keeps that
-property, and a file split by verb would not.
+All behind `require_role`, and all handing the identity on to `reads.py`,
+`dispatch.py` or `acknowledgements.py` rather than stopping at the door with
+it. The writes live here rather than in a router of their own so that they
+inherit the same standing guard the reads do: a file split by *audience* keeps
+that property, and a file split by verb would not.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from services.agent.config.protocol import PROTOCOLS
-from services.core import dispatch, invitations, reads
+from services.core import acknowledgements, dispatch, invitations, reads
 from services.core.db import pool
 from shared.auth import READS_THE_RECORD, ClinicalReader, require_role
 from shared.contracts.models import (
+    Acknowledgement,
     DispatchRequest,
     InterviewDetail,
     InterviewPage,
@@ -159,3 +160,23 @@ async def mint_invitation(
     if live is None:
         raise HTTPException(503, "this deployment has no database, so it issues no links")
     return await invitations.mint(live, interview_id)
+
+
+@router.post("/interviews/{interview_id}/acknowledge")
+async def acknowledge_interview(
+    interview_id: str,
+    user: ClinicalReader,
+) -> Acknowledgement:
+    """*I have this.* The only thing that clears a red flag off the band.
+
+    No body, because there is nothing to say: the acknowledgement records that
+    a named clinician has taken the call, and what they then decided belongs to
+    the sign-off or to the practice's own systems.
+
+    Idempotent, and the scope check is inside the `update` rather than in front
+    of it — see `acknowledgements.py`.
+    """
+    try:
+        return await acknowledgements.acknowledge(user, interview_id)
+    except reads.NotFound as exc:
+        raise HTTPException(404, f"no interview {interview_id}") from exc

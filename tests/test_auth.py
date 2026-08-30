@@ -48,6 +48,7 @@ GUARDED = [
     ("GET", "/me"),
     ("POST", "/interviews"),
     ("POST", "/interviews/iv_anything/invitation"),
+    ("POST", "/interviews/iv_anything/acknowledge"),
 ]
 
 

@@ -29,7 +29,9 @@ Postgres · `reads.py` the dashboard's SQL — every function takes a `CurrentUs
 review table is **ordered, searched, filtered and paged here**, never in the browser · `db.py` the only
 pool · `tokens.py` LiveKit tokens · `config.py` env · `queue.py` arrival (`resolve_interview`:
 a token, or the demo) · `dispatch.py` queueing a call for a named person, the only writer of
-`clinical.patients.clinician_email` · `invitations.py` the link, whose token is *derived* from
+`clinical.patients.clinician_email` · `acknowledgements.py` one `update` with `coalesce` — the
+only thing that clears a red flag off the band, and the reason it cannot silently reassign who owns
+one · `invitations.py` the link, whose token is *derived* from
 `(interview_id, nonce)` under `INVITE_SECRET` rather than drawn, so a second copy returns the link
 already sent and the table still stores only its hash.
 
@@ -83,7 +85,7 @@ another to the clinical shell.
 **`tests/`** — mirrors module names (`test_gate.py`, `test_machine.py`, …). `test_auth.py` is in
 plain `make test`: it generates an EC keypair and serves the JWKS from memory, so the real ES256
 path runs with no network and no project. `test_reads.py`, `test_persistence.py`, `test_dispatch.py`,
-`test_invitations.py` and `test_table.py` are behind the `postgres` marker.
+`test_invitations.py`, `test_escalations.py` and `test_table.py` are behind the `postgres` marker.
 `tests/e2e/` is everything that needs the real thing running. `patient.py` is a synthetic patient
 over LiveKit — it proves the *media* path and takes a live backend and a real key.
 `test_lifecycle_browser.py` is behind the `browser` marker (`make test-e2e`): `conftest.py` boots an
@@ -101,7 +103,9 @@ overwrites it. Check a new test against a deliberately broken build before trust
 `agent-review-and-pipecat-decision.md` = why Pipecat/Python. Read only for architectural tasks.
 
 **Does not exist yet** (don't go looking): the studio app in `system-map.md` is unbuilt; dispatch
-shipped at Phase 5a, but escalations and the signature ledger (5b, 5c) have not.
+shipped at Phase 5a and the red-flag acknowledgement at 5b, but the re-authored flag set (5b·1),
+live push (5b·2) and the signature ledger (5c) have not. Nothing pages anybody: the band reaches
+an open dashboard on the next fetch, which is why there is no `notified_at` column.
 `docs/ux/*.html` are frozen specs, not running code. Audio recording/retention is unbuilt —
 `store-media` in `system-map.md` is its intended home; clinical-research regulation may require it.
 

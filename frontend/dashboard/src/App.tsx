@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Account, InterviewDetail, InterviewSummary } from '@metafora/contracts';
-import { get } from './api.ts';
+import type { Account, Escalation } from '@metafora/contracts';
+import { post } from './api.ts';
 import { RecordProvider, useRecord } from './data.tsx';
 import { elapsed } from './format.ts';
 import { Link, useRoute } from './router.tsx';
@@ -8,7 +8,6 @@ import { Dashboard } from './screens/Dashboard.tsx';
 import { Deployments } from './screens/Deployments.tsx';
 import { Interview } from './screens/Interview.tsx';
 import { Patients } from './screens/Patients.tsx';
-import { flagged } from './transcript.ts';
 
 /**
  * The clinician portal.
@@ -82,18 +81,26 @@ function Chrome({ account, onSignOut }: { account: Account; onSignOut: () => voi
  * Full bleed, red, above everything. It is not a notification: the count and
  * the clock come from the record — from `reads.overview`, over the whole
  * caseload, so the number is the number and not however many happened to be on
- * the page below — and nothing here clears it. Only a human does, in Phase 5b,
- * when `clinical.escalations` exists.
+ * the page below — and only a human clears it.
+ *
+ * What it says is *what is owed*, not how bad it is. The two reds ask different
+ * things — `end_call` stopped the call, so somebody has to make contact;
+ * `urgent_escalate` let it run on, so a decision is owed by a time the
+ * protocol's own timeout fixed — and they are told apart from `action`, which
+ * the read already returns.
+ *
+ * It used to quote the patient. That meant a second request per band, fetching
+ * a whole transcript to reconstruct the words on the turn the gate scanned;
+ * the flag's own label says what those words were trying to say, and says it
+ * from the protocol version the interview pinned.
  */
 function Rail() {
-  const { overview } = useRecord();
+  const { overview, reload } = useRecord();
   // Newest first, and counted over the whole caseload — `reads.overview` does
-  // both. Filtering the dashboard's own list here was only ever right while
-  // that list was the whole record, and would have been a count of one page of
-  // the review table the moment the table paged properly.
-  const escalations = overview?.escalations ?? [];
+  // both, from one predicate, which is why the sentence and the count agree.
+  const open = overview?.escalations ?? [];
   const total = overview?.urgent ?? 0;
-  const latest = escalations[0];
+  const latest = open[0];
 
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -102,10 +109,30 @@ function Rail() {
   }, []);
   void tick;
 
-  const quote = useFlaggedWords(latest);
+  const [taking, setTaking] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+
+  // Clear the last refusal when the band moves on to a different call, so a
+  // sentence about one interview cannot sit under another one's name.
+  useEffect(() => setRefused(null), [latest?.interviewId]);
 
   if (!latest) return null;
-  const owed = latest.endedAt ?? latest.createdAt;
+
+  async function take(id: string) {
+    setTaking(true);
+    setRefused(null);
+    try {
+      await post(`/interviews/${id}/acknowledge`);
+      // The band, the `urgent` tile and the review table's row all move on the
+      // same fact, so the whole shared record is refetched rather than this one
+      // line being spliced out of it.
+      reload();
+    } catch (error) {
+      setRefused((error as Error).message);
+    } finally {
+      setTaking(false);
+    }
+  }
 
   return (
     <div className="rail">
@@ -113,46 +140,39 @@ function Rail() {
       <span className="rail__txt">
         <span className="rail__t">
           {total === 1
-            ? '1 escalation needs a consultation scheduled'
-            : `${total} escalations need a consultation scheduled`}
+            ? '1 red flag is waiting for a clinician'
+            : `${total} red flags are waiting for a clinician`}
         </span>
         <span className="rail__s">
-          {latest.patientFirstName}
-          {quote ? ` · “${quote}”` : ' · red flag raised before generation'} · raised{' '}
-          {new Date(owed).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+          {refused ?? `${latest.patientFirstName} · ${latest.flagLabel} · ${owed(latest)}`}
         </span>
       </span>
-      <span className="rail__c">{elapsed(owed)}</span>
-      <Link className="rail__b" to={`/interviews/${latest.id}`}>
+      <span className="rail__c">{elapsed(latest.raisedAt)}</span>
+      {/* Read first, take second. Acknowledging is a statement that somebody
+          has this call, and the primary action on the band is the one that
+          lets them make it truthfully. */}
+      <Link className="rail__b" to={`/interviews/${latest.interviewId}`}>
         Read it
       </Link>
+      <button
+        className="rail__b rail__b--ghost"
+        type="button"
+        disabled={taking}
+        onClick={() => take(latest.interviewId)}
+      >
+        {taking ? 'Acknowledging…' : 'Acknowledge'}
+      </button>
     </div>
   );
 }
 
-/**
- * The patient's own words, from the turn the gate stopped on.
- *
- * A second request, made lazily for one interview, because the list route does
- * not carry transcripts and should not: the band quotes one person and the
- * table has a hundred rows.
- */
-function useFlaggedWords(row: InterviewSummary | undefined): string | null {
-  const [quote, setQuote] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!row) return;
-    let live = true;
-    setQuote(null);
-    get<InterviewDetail>(`/interviews/${row.id}`)
-      .then((detail) => live && setQuote(flagged(detail.events)))
-      .catch(() => {
-        /* the band still stands up without the quote */
-      });
-    return () => {
-      live = false;
-    };
-  }, [row?.id]);
-
-  return quote;
+/** What this flag asks of a human, in the band's own words. */
+function owed(escalation: Escalation): string {
+  if (escalation.action === 'end_call') return 'call stopped — make contact';
+  if (!escalation.dueAt) return 'decision owed';
+  const by = new Date(escalation.dueAt).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `decision owed by ${by}`;
 }

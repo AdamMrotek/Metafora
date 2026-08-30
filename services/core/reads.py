@@ -7,11 +7,12 @@ role at the door and then runs an unscoped query has no place to put the second
 one when it is needed. Today the scope is one predicate (`OWNED_BY`); when it
 becomes a relationship it becomes a longer predicate in the same place.
 
-Reads only. The writers are named and there are four of them: `store.py` closes
+Reads only. The writers are named and there are five of them: `store.py` closes
 an interview and records what it captured, `queue.py` claims one, `dispatch.py`
-creates one, and `invitations.py` mints and spends its link. Nothing in this
-file writes, and the dashboard reaches the last two through their own routes
-rather than through a query here.
+creates one, `invitations.py` mints and spends its link, and
+`acknowledgements.py` stamps the one column that says a human has taken a red
+flag. Nothing in this file writes, and the dashboard reaches the last three
+through their own routes rather than through a query here.
 """
 
 from typing import Any
@@ -20,6 +21,7 @@ from services.agent.safety import SEVERITY
 from services.core import db
 from shared.auth import CurrentUser
 from shared.contracts.models import (
+    Escalation,
     ExperienceDay,
     ExperienceRange,
     ExperienceSummary,
@@ -154,12 +156,43 @@ _SUMMARY_COLUMNS = """
 #: as 0/0: a meter that says the script is empty, when what it means is that
 #: nothing has been written down yet. 0 of 6 is the true statement.
 
-#: `safety.py`'s ranking, as a SQL ladder, generated from the dict itself so
-#: the two cannot drift. Which flag is "worst" is a clinical ordering, and it is
-#: written down in exactly one place.
-_BY_SEVERITY = "case e.payload ->> 'action' " + " ".join(
-    f"when '{action}' then {rank}" for action, rank in SEVERITY.items()
-) + " else -1 end"
+#: `safety.py`'s ranking, as a SQL ladder over an arbitrary expression,
+#: generated from the dict itself so the two cannot drift. Which flag is "worst"
+#: is a clinical ordering, and it is written down in exactly one place.
+def _by_severity(action: str) -> str:
+    ladder = " ".join(f"when '{a}' then {rank}" for a, rank in SEVERITY.items())
+    return f"case {action} {ladder} else -1 end"
+
+
+#: Ranked over the flag's *own* action, resolved against the protocol version
+#: the interview pinned — never over `e.payload ->> 'action'`, which is the
+#: worst action of that whole turn and would give every hit on a mixed turn the
+#: worst one's rank. That is also what makes the `urgent` tile and the
+#: escalation band agree: both ask the pinned version which id is which, so a
+#: hit the version does not define cannot be red in one and absent from the
+#: other.
+_BY_SEVERITY = _by_severity("flag.value ->> 'action'")
+
+#: Red, derived rather than typed out: everything at least as serious as a
+#: triage escalation. `end_call` stopped the call and `urgent_escalate` did not,
+#: which is the difference the band draws — but both are a thing a named human
+#: owes an answer to, and that is what "red" means here. Taking it from
+#: `SEVERITY` is what keeps 5b·1's re-authoring from having to edit this file.
+RED_ACTIONS = tuple(
+    action for action, rank in SEVERITY.items() if rank >= SEVERITY["urgent_escalate"]
+)
+_RED = ", ".join(f"'{action}'" for action in RED_ACTIONS)
+
+#: What the escalation band and the `urgent` tile are both about, in one place —
+#: the second scope predicate this file has, and for the same reason as the
+#: first. Two numbers about the same thing on the same screen, computed
+#: differently, is invariant 4's failure in a new dress: the band's own sentence
+#: quotes the tile's count.
+#:
+#: Red is the flag's **action**, never the id prefix. Any status counts,
+#: `running` included: a triage flag exists the moment the gate scans, and the
+#: call then runs on for minutes. The clock starts at the scan, not the hangup.
+UNACKNOWLEDGED_RED = f"(g.worst_flag in ({_RED}) and i.acknowledged_at is null)"
 
 #: What the gate found, per interview. `transcript.events` holds a
 #: `safety.scanned` for every committed turn — including the ones that matched
@@ -169,6 +202,11 @@ _BY_SEVERITY = "case e.payload ->> 'action' " + " ".join(
 #:
 #: Distinct rules rather than turns, because a patient who mentions their
 #: anticoagulant three times has raised one flag, not three.
+#:
+#: `worst_flag` is resolved through the version the interview pinned rather than
+#: read off the scan — see `_BY_SEVERITY`. The version is append-only, so the
+#: answer for a call taken last year does not move when the flag set is
+#: re-authored.
 _SUMMARY_FROM = f"""
     from clinical.interviews i
     join clinical.patients  p  on p.id = i.patient_id
@@ -184,10 +222,15 @@ _SUMMARY_FROM = f"""
     ) d on true
     left join lateral (
         select count(distinct hit)::int                                  as flag_count,
-               (array_agg(e.payload ->> 'action' order by {_BY_SEVERITY} desc))[1]
+               (array_agg(flag.value ->> 'action' order by {_BY_SEVERITY} desc))[1]
                                                                         as worst_flag
-        from transcript.events e,
-             jsonb_array_elements_text(e.payload -> 'hits') hit
+        from transcript.events e
+        cross join lateral jsonb_array_elements_text(e.payload -> 'hits') hit
+        -- Left, so a hit the pinned version does not name still counts toward
+        -- `flag_count` -- something matched, and the row should say so -- while
+        -- contributing no action, which sorts it below every real one.
+        left join lateral jsonb_array_elements(pr.version -> 'redFlags') flag
+               on flag.value ->> 'id' = hit
         where e.interview_id = i.id and e.type = 'safety.scanned'
     ) g on true
 """
@@ -293,21 +336,90 @@ def _needle(search: str | None) -> str | None:
 #: about work that came back, so this is the half of the record they share.
 _CAME_BACK = "i.status in ('completed', 'abandoned') and i.outcome is distinct from 'safety'"
 
-#: The three tiles, as one row. They are three errands and not a census: what
-#: the gate stopped, what it flagged on a call that ran on, and what neither
-#: happened to but that stopped short of the script. A finished call falls in
-#: exactly one of them, and flags outrank a short script because a flagged call
-#: is read either way.
+#: The three tiles, as one row. They are three errands and not a census: a red
+#: nobody has taken yet, what the gate flagged on a call that ran on and that
+#: somebody has, and what neither happened to but that stopped short of the
+#: script. A call falls in at most one of them, and flags outrank a short script
+#: because a flagged call is read either way.
+#:
+#: `urgent` used to be `i.outcome = 'safety'` — what the gate *stopped*, which
+#: is only ever the `end_call` path. A triage red never reached it, so the one
+#: tile on the screen that says "somebody has to do something" could not count
+#: the flag the protocol's own timeout is a clock for. It is now
+#: `UNACKNOWLEDGED_RED`, the same predicate the band draws.
+#:
+#: `flagged` has to subtract it, or a completed call carrying a triage red would
+#: be counted twice on the same screen — and a red the gate stopped stays out of
+#: `_CAME_BACK` whether or not anyone has acknowledged it, because a call that
+#: was stopped did not run on.
 _COUNTS = f"""
     select
-        count(*) filter (where i.outcome = 'safety')::int as urgent,
-        count(*) filter (where {_CAME_BACK} and g.flag_count > 0)::int as flagged,
+        count(*) filter (where {UNACKNOWLEDGED_RED})::int as urgent,
+        count(*) filter (
+            where {_CAME_BACK} and g.flag_count > 0 and not {UNACKNOWLEDGED_RED}
+        )::int as flagged,
         count(*) filter (
             where {_CAME_BACK} and g.flag_count = 0 and f.captured < d.total
         )::int as incomplete
     {_SUMMARY_FROM}
     where {OWNED_BY}
 """
+
+
+#: The escalation band, as SQL. One row per interview, because the
+#: acknowledgement is per interview — a call carrying two reds is one line and
+#: is cleared once.
+#:
+#: The flag's label and its action are resolved against the `ProtocolVersion`
+#: the interview pinned rather than read off the scan's payload. The payload
+#: carries the worst action of that *turn*, which is the right thing for
+#: `worst_flag` and the wrong thing here: on a turn that matched a yellow and a
+#: red, every hit on it would inherit the red's action and the band could name
+#: the wrong flag. The pinned version knows which id is which — and it is
+#: append-only, so an old line keeps the label and the timeout it was raised
+#: under however the flag set is re-authored afterwards.
+_ESCALATIONS = f"""
+    with red as (
+        select i.id                    as interview_id,
+               p.first_name            as patient_first_name,
+               flag.value ->> 'label'  as flag_label,
+               flag.value ->> 'action' as action,
+               e.at                    as raised_at,
+               (pr.version -> 'urgent' ->> 'timeoutMinutes')::int as timeout_minutes
+        from clinical.interviews i
+        join clinical.patients  p  on p.id  = i.patient_id
+        join config.protocols   pr on pr.id = i.protocol_id
+        join transcript.events  e  on e.interview_id = i.id and e.type = 'safety.scanned'
+        cross join lateral jsonb_array_elements_text(e.payload -> 'hits') hit
+        join lateral jsonb_array_elements(pr.version -> 'redFlags') flag
+             on flag.value ->> 'id' = hit
+        where {OWNED_BY}
+          and i.acknowledged_at is null
+          and flag.value ->> 'action' in ({_RED})
+    )
+    select * from (
+        select distinct on (interview_id)
+               interview_id, patient_first_name, flag_label, action, raised_at,
+               -- Null when the protocol declares no urgent escalation, which is
+               -- an honest "no deadline" rather than a deadline of now.
+               raised_at + make_interval(mins => timeout_minutes) as due_at
+        from red
+        order by interview_id, {_by_severity("action")} desc, raised_at asc
+    ) worst
+    order by raised_at desc, interview_id desc
+    limit $2
+"""
+
+
+async def escalations(user: CurrentUser) -> list[Escalation]:
+    """Every red flag in this caller's scope that nobody has taken.
+
+    A read of its own rather than a filter over `_SUMMARY_COLUMNS`, because the
+    two things the band has to say are neither of them on the summary: which
+    flag, and by when. See `Escalation`.
+    """
+    rows = await _pool().fetch(_ESCALATIONS, user.email, RAIL_LIMIT)
+    return [Escalation.model_validate(dict(r)) for r in rows]
 
 
 async def overview(user: CurrentUser) -> Overview:
@@ -320,25 +432,21 @@ async def overview(user: CurrentUser) -> Overview:
     been counting a page and calling it the record. Counted here instead, over
     the caller's whole scope, which is the only place the number is true.
 
-    Four statements rather than one. They share `_SUMMARY_FROM` and could be
-    folded into a single CTE returning four aggregates, and that query would be
-    the kind nobody can read six months later; the two lists are bounded and the
-    counts are one scan, so the cost of keeping them apart is a round trip on an
-    open pool.
+    Four statements rather than one. Three of them share `_SUMMARY_FROM` and
+    could be folded into a single CTE returning four aggregates, and that query
+    would be the kind nobody can read six months later; the lists are bounded
+    and the counts are one scan, so the cost of keeping them apart is a round
+    trip on an open pool. The fourth is `escalations()`, which is a different
+    shape entirely — see `_ESCALATIONS`.
     """
     pool = _pool()
 
     counts = await pool.fetchrow(_COUNTS, user.email)
 
-    # Every open escalation, newest first — the band draws the latest and says
-    # how many there are, and `urgent` above is the number it trusts for that.
-    escalations = await pool.fetch(
-        f"select {_SUMMARY_COLUMNS} {_SUMMARY_FROM} "
-        f"where {OWNED_BY} and i.outcome = 'safety' "
-        f"order by {_ACTIVITY} desc, i.id desc limit $2",
-        user.email,
-        RAIL_LIMIT,
-    )
+    # Every unacknowledged red, newest first — the band draws the latest and
+    # says how many there are, and `urgent` above is the number it trusts for
+    # that. Both come from `UNACKNOWLEDGED_RED`, which is why they agree.
+    open_reds = await escalations(user)
 
     # What is still out, soonest first: the dashboard's scheduled card and the
     # Deployments screen's upcoming table are the same rows asked twice.
@@ -366,7 +474,7 @@ async def overview(user: CurrentUser) -> Overview:
         urgent=counts["urgent"],
         flagged=counts["flagged"],
         incomplete=counts["incomplete"],
-        escalations=[InterviewSummary.model_validate(dict(r)) for r in escalations],
+        escalations=open_reds,
         queued=[InterviewSummary.model_validate(dict(r)) for r in queued],
         protocols=[ProtocolOption.model_validate(dict(r)) for r in protocols],
     )

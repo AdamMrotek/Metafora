@@ -309,6 +309,55 @@ class InterviewPage(CamelModel):
     pages: int
 
 
+class Escalation(CamelModel):
+    """One line of the escalation band: a red flag nobody has taken yet.
+
+    Not an `InterviewSummary`. The band is a worklist line rather than a table
+    row, and the two things it has to say — *which* flag, and *by when* — are
+    neither of them on the summary: `worst_flag` is the action string, and
+    there is no scan timestamp on the row at all. Widening `_SUMMARY_COLUMNS`
+    to carry them would put two columns on every row of the review table that
+    only a banner ever reads.
+
+    It also replaces what the browser used to do: fetch the whole transcript of
+    the flagged interview and reconstruct the patient's words from the turn the
+    gate scanned. The label says what the quote was trying to say, and says it
+    from the protocol the interview pinned.
+    """
+
+    interview_id: str
+    patient_first_name: str
+    #: The flag's own label, resolved against the `ProtocolVersion` this
+    #: interview pinned — so a re-authored flag set never renames an old line.
+    flag_label: str
+    #: `end_call` (the call was stopped — make contact) or `urgent_escalate`
+    #: (a decision is owed by `due_at`). The band tells them apart from this
+    #: rather than from a second field.
+    action: RedFlagAction
+    #: When the gate scanned the turn, not when the call ended. On a triage
+    #: flag the call runs on for minutes afterwards, and the clock started at
+    #: the scan.
+    raised_at: datetime
+    #: `raised_at` plus the pinned version's `urgent.timeout_minutes`, so
+    #: re-authoring a timeout never retro-moves a deadline that was already
+    #: running. Null when the protocol declares no urgent escalation.
+    due_at: datetime | None
+
+
+class Acknowledgement(CamelModel):
+    """What `POST /interviews/{id}/acknowledge` answers with.
+
+    It means *I have this* and nothing more — no disposition, no close reason.
+    What was decided belongs to the sign-off or to the practice's own systems.
+    Idempotent: a second POST returns the first stamp and the first
+    acknowledger rather than reassigning who owns the decision.
+    """
+
+    interview_id: str
+    acknowledged_at: datetime
+    acknowledged_by: str
+
+
 class Overview(CamelModel):
     """Everything on the dashboard that is not one page of the table.
 
@@ -319,15 +368,17 @@ class Overview(CamelModel):
     calling it the caseload.
     """
 
-    #: The three tiles. Three errands, not a census: what the gate stopped, what
-    #: it flagged on a call that ran on, and what neither happened to but which
-    #: stopped short of its script.
+    #: The three tiles. Three errands, not a census: a red nobody has taken
+    #: yet, what the gate flagged on a call that ran on and that somebody has,
+    #: and what neither happened to but which stopped short of its script.
     urgent: int
     flagged: int
     incomplete: int
-    #: Open escalations, newest first, for the band above every screen. Capped —
-    #: `urgent` is the count it states.
-    escalations: list[InterviewSummary]
+    #: Unacknowledged red flags, newest first, for the band above every screen.
+    #: Capped — `urgent` is the count it states, and both are counted over the
+    #: caller's whole scope so the band's sentence and the tile above it cannot
+    #: disagree about the same number.
+    escalations: list[Escalation]
     #: Calls still out, soonest first: the scheduled card and the Deployments
     #: screen's upcoming table are the same rows asked twice.
     queued: list[InterviewSummary]

@@ -371,6 +371,18 @@ body { margin: 0; background: var(--sunken); }
    moved. */
 .rail__t, .rail__s { display: block }
 
+/* The band's second action. `.rail__b` is one solid white button in the spec,
+   which was right while the band only linked somewhere; acknowledging is a
+   second verb on the same line, and it is the quieter of the two because
+   reading the call is what makes taking it truthful. */
+.rail__b--ghost {
+  background: transparent;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+}
+.rail__b--ghost:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14) }
+.rail__b:disabled { opacity: 0.6; cursor: default }
+
 /* The chrome's nav is real navigation here, not three words in a mockup. */
 .chrome nav a {
   color: inherit;

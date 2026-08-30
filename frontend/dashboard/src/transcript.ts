@@ -78,12 +78,3 @@ export function lines(events: TranscriptEvent[]): Line[] {
 
   return out;
 }
-
-/** The patient's own words on the turn that tripped the gate — what the
- *  escalation rail quotes. */
-export function flagged(events: TranscriptEvent[]): string | null {
-  for (const line of [...lines(events)].reverse()) {
-    if (line.scan?.hit && line.text) return line.text;
-  }
-  return null;
-}

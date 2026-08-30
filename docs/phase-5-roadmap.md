@@ -1,21 +1,27 @@
-# Phase 5 — dispatch, escalations, the signature ledger
+# Phase 5 — dispatch, red flags, the signature ledger
 
 ## Context
 
 Phase 4 shipped the clinician dashboard's **read** path. Everything the dashboard *writes* is
 still unbuilt, and `docs/roadmap.md:299-341` calls that Phase 5: dispatch, escalations, sign-off.
 Until dispatch exists, `clinical.patients.clinician_email` is never set, so "a caseload" is just
-the unowned demo rows; until escalations exist, an `urgent_escalate` red flag is counted on the row
-and nothing more — no record, no notification, nobody obliged to clear it; until the ledger exists,
-the composer's hashes come from `frontend/dashboard/src/demo.ts`.
+the unowned demo rows; until 5b, a red flag was counted on the row and nothing more — nobody
+obliged to clear it; until the ledger exists, the composer's hashes come from
+`frontend/dashboard/src/demo.ts`.
 
-This document stages that into **5·0 identity → 5a dispatch → 5b escalations → 5c ledger**, each
-independently shippable, in the order the MVP line needs them (deploy → intake → return → review →
-sign). 5·0 is the odd one out and is **shipped**: it depends on none of the others and was the
-cheapest way to shrink `demo.ts`, which every later stage otherwise keeps inheriting.
+This document stages that into **5·0 identity → 5a dispatch → 5b red flags → 5b·1 the flag set →
+5b·2 push → 5c ledger**, each independently shippable, in the order the MVP line needs them (deploy → intake →
+return → review → sign). 5·0 is the odd one out and is **shipped**: it depends on none of the
+others and was the cheapest way to shrink `demo.ts`, which every later stage otherwise inherits.
 
-**5·0 and 5a are both shipped.** `clinical.patients.clinician_email` is now written, so the scope
-predicate in `reads.py` discriminates for the first time and 5b and 5c can be built on it.
+**5·0, 5a and 5b are shipped.** `clinical.patients.clinician_email` is written, so the scope
+predicate in `reads.py` discriminates; `clinical.interviews.acknowledged_at` is the second such
+predicate, and 5c is built on both.
+
+**5b was three jobs and is now two, and the first of them is shipped.** The acknowledgement is 5b;
+re-authoring the flag set and what the patient hears on a triage flag is 5b·1. Neither waits for
+the other — 5b reads the flag's *action* out of the protocol version each interview pinned, so the
+flags may move underneath it without moving a line already on the band.
 
 **5a deliberately drops the email channel.** The roadmap's dispatch sends an emailed link 24h
 before `scheduled_for`; an email provider is still unchosen and would be a fourth egress
@@ -286,52 +292,255 @@ server's sentence instead of the Start button.
 
 ---
 
-# 5b · Escalations
+# 5b · Red flags a human clears — **shipped**
 
-**Done when:** an `urgent_escalate` red flag writes a record, reaches an open dashboard in
-seconds through `svc-core`, and only a human clears it.
+**Done:** a red flag puts a line on the dashboard saying *what is owed*, and only a named clinician
+clears it. Getting that line there without a reload is still 5b·2.
 
-Today `services/agent/safety.py:76` sets `blocked` for `end_call` **only**, so an
-`urgent_escalate` produces a `safety.scanned` transcript row and nothing else
-(`services/agent/gate.py:60-62`). `reads.py` now counts those rows onto the summary
-(`flag_count` / `worst_flag`), so the review table and its tiles can tell a flagged call from a
-clean one — but a count on a row is not an escalation: nothing is raised, nothing is notified, and
-no one is obliged to clear it. The dashboard band still fakes it off `outcome === 'safety'`
-(`App.tsx:88-91`).
+Everything below was built as specified. Four departures, recorded rather than quietly taken:
 
-1. **Migration** — `clinical.escalations (id, interview_id, patient_id, kind check in
-   ('urgent','soft'), quote, say, rota_target, raised_at, notified_at, acknowledged_at,
-   acknowledged_by → config.accounts(email), closed_at, closed_by, close_reason)`. Partial index
-   on `closed_at is null`.
-   *Recommendation:* do **not** add a fifth `clinical.interviews.status`. The roadmap's "fourth
-   outcome state — completed and also an escalation" falls out for free as `status='completed'`
-   with an open escalation row, and leaves the existing CHECK and `claim()` untouched.
-2. **Report upward, write in core** (`docs/system-map.md:64`, rule 2). Give
-   `services/agent/gate.py` an `on_escalation` callback alongside the existing blocked path;
-   `services/core/lifecycle.py` wires it (next to `_on_blocked`, `:54-64`) and a new
-   `services/core/escalations.py` does the insert.
-3. **Authored acknowledgement** — allow `say` on `urgent_escalate` in
-   `shared/contracts/models.py` and `services/agent/config/protocol.py`, spoken alongside the
-   generated reply (`docs/example-interview.md:142-146`).
-4. **Reads** — `reads.escalations(user)` using the same `OWNED_BY`; `GET /escalations`.
-5. **Writes** — `POST /escalations/{id}/acknowledge` and `/close`, both `ClinicalReader`, both
-   scoped by `OWNED_BY` so a clinician cannot clear someone else's.
-6. **Push** — `GET /escalations/stream`, SSE held open from `svc-core`, behind `ClinicalReader`,
-   filtered per subscriber by the same predicate. An in-process `asyncio` broadcaster fed by
-   step 2, heartbeat comment every ~15s, drained in `app.py`'s `lifespan`.
-   Explicitly **not** Supabase Realtime — `docs/system-map.md:204-211` and
-   `docs/roadmap.md:325-335`. Record the constraint this carries: in-process fan-out means one
-   machine, which `docs/deployment.md` already assumes.
-7. **Dashboard** — `Rail` (`App.tsx:78-120`) reads the escalations list instead of filtering
-   `outcome === 'safety'`; the inert **Schedule** button becomes acknowledge/close.
-   *Trap:* `EventSource` cannot send an `Authorization` header. Subscribe with `fetch` + a
-   `ReadableStream` reader, with backoff reconnect and a poll fallback.
-8. **Tests** — a soft flag does not end the call and pages nobody; an urgent flag writes a row;
-   scoping on read, acknowledge and close; the stream delivers to the owner and not to a stranger.
+1. **`worst_flag` is now resolved through the pinned protocol version, not off the scan's
+   payload.** This was not in the plan and is the only change to code 5b did not otherwise touch.
+   `SafetyScanned.action` is the worst action of a whole *turn*, so on a turn matching a yellow and
+   a red every hit inherits the red's rank — which is fine for a per-call maximum and wrong for a
+   band that has to name *which* flag. Once the band resolved each hit against the version, the two
+   consumers of §2's one predicate were reading two different things again, and the scratch
+   database proved it: `test_the_tiles_count_the_whole_scope_not_a_page` came back `urgent=11` with
+   ten lines in the band, the eleventh being a fabricated hit id no protocol defines. So
+   `_SUMMARY_FROM`'s lateral now left-joins `pr.version -> 'redFlags'` and ranks the flag's own
+   action. `flag_count` is deliberately unchanged — an unrecognised hit still counts, because
+   something did match.
+2. **No partial index on `acknowledged_at is null`.** The plan asked for one; that predicate
+   matches nearly every interview ever recorded, so it selects nothing and costs a write per insert
+   to say so. What narrows the band is the flag, which is in `transcript.events`. The index that
+   shipped is `interviews_acknowledged_by`, partial on `acknowledged_by is not null` — the one the
+   foreign key wants, on `patients_by_clinician`'s pattern.
+3. **`Overview.escalations` is still on `/overview`, not a route of its own.** The plan's "a shared
+   fetch in `data.tsx` beside `/overview` and `/patients`" is satisfied by the field that was
+   already there: the band, the `urgent` tile and the review table's row all move on the same fact,
+   so one refetch is what makes them agree rather than three that can land out of order.
+4. **`reads.RED_ACTIONS` is derived from `SEVERITY`, not typed out.** `('end_call',
+   'urgent_escalate')` is everything ranked at or above a triage escalation, read from
+   `safety.py`'s own dict — so 5b·1 can move flags between actions without editing `reads.py`.
 
-**Verify:** drive a call into an `urgent_escalate` flag with the dashboard already open; the band
-appears without a reload, clocks correctly, and clears only when acknowledged — then confirm a
-second clinician's dashboard never saw it.
+**The acknowledgement is one statement.** `update … set acknowledged_at = coalesce(acknowledged_at,
+now()), acknowledged_by = coalesce(acknowledged_by, $1) … where {OWNED_BY}`. Idempotence,
+non-reassignment and the scope check are all in that one `where`/`coalesce` pair, which is what
+makes them hold under two clicks at once — the shape "select, decide, update" has a window between
+the first two where both callers see null. `NotFound` when it matches nothing, exactly as a read
+outside scope answers.
+
+**Not touched, and worth knowing:** `PatientSummary.has_escalation` on the patients screen is still
+`bool_or(i.outcome = 'safety')`. It answers a different question — *what is still owed on this
+person*, alongside `open_count` — and the band's predicate is per interview. It is the third place
+in the repo using the word, and the one to look at first if the patients table and the band ever
+disagree.
+
+**Original plan, as built:**
+
+## Scope: the acknowledgement, and nothing else
+
+An earlier draft of this stage did three jobs at once — rewrite the flag set, give the agent a new
+sentence to speak on a triage flag, and build the acknowledgement. Only the third matches the
+sentence above, and the first two change what the *patient* hears, which wants a different kind of
+review than a schema change. They are **5b·1**, below, and nothing here waits for them.
+
+Nothing needs authoring first. `rf_anticoagulant_taken` and `rf_fitness_change` are already
+`action='urgent_escalate'` (`services/agent/config/protocol.py:273,286`), so the record already
+holds reds this stage can put on the screen and clear. Today they reach no band at all — the band
+is `i.outcome = 'safety'` (`reads.py:337`), which only ever catches the `end_call` path.
+
+## No escalations table, and no write at flag time
+
+`PostgresSessionWriter.append` already queues `safety.scanned` to `transcript.events` off the media
+path (`session_log.py:255-267`), and `reads.py` already derives the worst flag from those rows. The
+one thing the record cannot produce is **that a human has seen it**.
+
+### 1 · Migration
+
+`acknowledged_at` and `acknowledged_by → config.accounts(email)` on `clinical.interviews`, partial
+index on `acknowledged_at is null`. No new table, no `escalations.py`, no gate callback. No fifth
+`status`: "completed and also flagged" is `status='completed'` with `acknowledged_at` null, which
+leaves the CHECK and `claim()` alone.
+
+### 2 · One predicate, defined once
+
+Red is the flag's **action**, never the id prefix:
+
+```
+worst_flag in ('end_call', 'urgent_escalate') and i.acknowledged_at is null
+```
+
+It lives beside `OWNED_BY` in `reads.py` and both consumers read it: the band *and* the `urgent`
+tile. Today the tile is `i.outcome = 'safety'` (`reads.py:303`) while the band would be the new
+predicate — two numbers about the same thing on the same screen, which is invariant 4's failure in
+a new dress, and the band's own sentence quotes the tile's number (`App.tsx:114-117`). So `urgent`
+changes meaning with it: **reds not yet acknowledged**.
+
+**Any status counts, including `running`.** An `end_call` red lands `abandoned` within seconds, so
+this only bites the triage kind: the flag exists the moment the gate scans, and the call runs on
+for minutes. The clock starts at the scan, not the hangup — and a band that showed only ended calls
+would leave 5b·2 with nothing live to push.
+
+### 3 · A read shaped like the line it draws
+
+The band's line needs the flag's **label** and the **time it fired**. `InterviewSummary` has
+neither: `worst_flag` is the action string (`reads.py:186-188`), and there is no scan timestamp on
+the row at all. So a new `reads.escalations(user)`, scoped by `OWNED_BY` verbatim, returning
+`interviewId · patientFirstName · flagLabel · action · raisedAt · dueAt` — resolving the hit id to
+its label by joining `config.protocols.version`, and computing `dueAt` as `raisedAt +
+urgent.timeout_minutes` **from the version the interview pinned**, so re-authoring a timeout never
+retro-moves an old deadline. `Overview.escalations` stops being `InterviewSummary[]`.
+
+Not by widening `_SUMMARY_COLUMNS`: the band is a worklist line, not a table row, and the review
+table should not carry two columns only a banner reads. It also retires `useFlaggedWords`
+(`App.tsx:135`), which reconstructs the patient's words from the transcript in the browser to say
+what the label says better.
+
+### 4 · Write
+
+`POST /interviews/{id}/acknowledge` in `routes/interviews.py`, `ClinicalReader`, scoped by
+`OWNED_BY`. It means *I have this* and nothing more — no `close_reason`, no disposition. What was
+decided belongs to the sign-off or to the practice's own systems.
+
+**Per interview, not per flag,** so a call carrying two reds is cleared once: "I have this" is a
+statement about the call, not about a pattern match — and per-flag would need the table this stage
+refuses. **Idempotent and not reversible:** a second POST returns the first stamp and the first
+`acknowledged_by` rather than overwriting them, so it cannot quietly reassign who owns it, and
+there is no un-acknowledge because nobody has yet needed one.
+
+### 5 · Dashboard
+
+`Rail` (`App.tsx:78-120`) reads `escalations` instead of filtering `outcome === 'safety'`; the
+inert **Schedule consultation** button becomes acknowledge. A shared fetch in `data.tsx` beside
+`/overview` and `/patients`, because it describes the whole caseload (invariant 4) — so it arrives
+on load and after an acknowledgement, and no sooner.
+
+**The band names what is owed, not how bad it is:**
+
+> **Sarah Chen** · Anticoagulant not stopped as instructed · decision owed by 17:00
+
+The two reds ask different things — `end_call` is *this call was stopped, make contact*,
+`urgent_escalate` is *a decision is owed by «time»* — and are distinguishable from the `action` the
+read already returns, with no new field.
+
+### 6 · Tests
+
+A yellow raises no band; a red appears for its owner and not for a stranger; a red on a `running`
+interview is in the band; acknowledge is scoped, idempotent, and removes it from both the band and
+the `urgent` tile; a second acknowledge by a different clinician does not change `acknowledged_by`.
+
+**Nobody is paged.** The band reaches an open dashboard; the honest description is "it will be
+seen", not "someone will call" — 5a's dropped email channel again. So no `notified_at`, which would
+claim an event nothing produces, and no `rota_target`: the rota is on the protocol version the
+interview ran (`protocol.py:330`), versioned and append-only, which is where a notifier will read
+it.
+
+**Verify:** take a call and say *"I'm still taking the apixaban"* — `rf_anticoagulant_taken`'s own
+`proving_utterance`, a red in the protocol as it ships today. Reload: the band names the decision
+and its deadline, and clears only when acknowledged. A second clinician never saw it. An attendance
+answer produces a yellow row and no band.
+
+---
+
+# 5b·1 · The flag set re-read
+
+**Done when:** the four actions are named for what they ask of a human, the triage red catches
+something worth catching, and the rule that keeps the flag set from growing into symptom triage is
+written down in `safety.py`.
+
+Split from 5b because none of it is needed to clear a flag, and all of it changes what a patient
+hears. Order between them is free; 5b is written against the protocol as it ships today, and this
+stage moves flags underneath a band that reads the action rather than the id.
+
+## Red and yellow are the four actions, renamed
+
+Not a new axis to store — a name for the grouping `SEVERITY` already makes, 1:1:
+
+| | action | the call | the patient hears | who acts, and by when |
+|---|---|---|---|---|
+| **Red · emergency** | `end_call` | stops | 999 / Samaritans, **and** that the practice will contact them | the practice, today. Custodial, not clinical |
+| **Red · triage** | `urgent_escalate` | continues | nothing authored — see below | a clinician, before the list |
+| **Yellow** | `soft_review` | continues | nothing authored | the unit — **proceed / move / cancel** |
+| **Note** | `note_only` | continues | nothing | context in the record |
+
+**`rf_fitness_change` and `rf_anticoagulant_taken` move to `soft_review`**, renamed `yf_`. They are
+urgent to the *booking*, not to the patient. Yellow is then one thing: those two plus
+`yf_attendance_risk` and `yf_no_escort` are all *the unit has a decision to make about this
+booking*. Every call produces yellows; reds are rare, which is what makes a band that is usually
+absent worth reading.
+
+**The triage red has to be authored.** Once those two move, `urgent_escalate` is empty — and
+nothing in `PREOP_CHECK_V1` catches *new pain where they are about to operate*, which is what
+`PREOP_CHECK_V1.urgent.timeout_minutes = 120` is the clock for. Its patterns must be phrases worth
+a look out of context — `new pain`, `getting worse`, `red and hot` — never `pain`. `safety.py`
+handles no negation, so false positives are certain, and the rule that makes them acceptable
+belongs in that file:
+
+> **A red flag is legitimate only when the correct response to a false positive is still
+> acceptable.** Stopping an admin call so a person rings back is. Producing clinical advice is not,
+> at any accuracy.
+
+That is what stops the flag set growing into symptom triage.
+
+## The patient hears nothing new, and that is decided
+
+An earlier draft allowed `say` on `urgent_escalate`, spoken alongside the generated reply. It is
+dropped, on a mechanical objection rather than an editorial one: the gate can only speak by pushing
+a `TTSSpeakFrame` (`gate.py:83`), and that is safe on the blocked path *because* the transcript
+frame is swallowed there and nothing else is generating. On a triage flag the turn goes on to the
+model, so the gate's sentence and the generated reply race into the same TTS — two utterances with
+no defined order, under barge-in constants (`config/tuning.py`) set for one.
+
+The authored-sentence rule stands for the reds that do stop the call — every one, on `SELF_HARM`'s
+model:
+
+> **[what this system is doing] + [a route that does not depend on this system]**
+
+Nothing in this deployment pages anybody, so *"a clinician will call you"* is a promise it cannot
+keep. If a triage sentence is ever wanted, it needs the pipeline to guarantee it precedes the
+generated turn — a real change to `pipeline.py`, and its own decision.
+
+**Tests:** the moved flags scan `soft_review`; the new triage red scans `urgent_escalate` on its
+`proving_utterance`; `test_prompts.py`'s line holds; the band from 5b follows the flags without
+changing, because it reads the action.
+
+**Verify:** an apixaban answer now produces a yellow row and no band, where before it produced a
+band. The new triage red produces one.
+
+---
+
+# 5b·2 · Live push
+
+**Done when:** a red flag raised on a call in progress reaches an already-open dashboard in seconds.
+
+Split from 5b because it is the only part with a long-lived connection — a stream, a reconnect
+strategy, a broadcaster with a lifetime, and a limit on how many machines this may run on. It is
+also the only part that needs the gate to report upward: 5b's flag reaches Postgres on the
+`SessionWriter` the pipeline already holds, so `gate.py`'s report and its wiring in `lifecycle.py`
+(beside `_on_blocked`, `:54-64`) belong here.
+
+1. **Broadcaster** — in-process `asyncio` fan-out. `publish(interview_id)` from the gate's report,
+   per-connection subscriber queues, bounded, dropping a slow subscriber rather than backing the
+   publisher up: a call must never feel a browser. Drained in `app.py`'s `lifespan`.
+2. **Route** — `GET /interviews/stream`, SSE behind `ClinicalReader`, filtered per subscriber by
+   `OWNED_BY`. Heartbeat comment every ~15s so a proxy does not close it.
+3. **A nudge, not a payload** — the event carries an interview id; the browser refetches the band it
+   already fetches. A lost message then costs seconds rather than a wrong band, the stream cannot
+   disagree with the query, and no medical text crosses it.
+4. **Dashboard** — subscribe beside `data.tsx`'s band fetch and call its `reload()`. *Trap:*
+   `EventSource` cannot send an `Authorization` header — use `fetch` with a `ReadableStream` reader
+   and backoff reconnect. **The fallback is 5b**: stream down means the band is what the last fetch
+   returned, degraded rather than broken.
+5. **Not Supabase Realtime** — `docs/system-map.md:204-211`, `docs/roadmap.md:325-335`. In-process
+   fan-out means **one machine**, which `docs/deployment.md` assumes; read `fly.toml` against that
+   before it ships. A nudge-shaped event is the cheapest thing to move onto a real bus later.
+6. **Tests** — delivers to the owner and not to a stranger; an unauthenticated subscriber is
+   refused; a dropped subscriber does not block the publisher; shutdown closes open streams.
+
+**Verify:** two clinicians, two browsers. Drive a call into a red — the owner's band appears
+untouched, the stranger's does not. Stop the backend: the owner's dashboard degrades to 5b and
+reconnects on its own.
 
 ---
 
@@ -378,9 +587,15 @@ review it, sign it, then re-read `GET /interviews/{id}/ledger` and confirm the h
 
 ## Order of work
 
-5·0 and 5a are both shipped. 5a was the only stage that makes `clinician_email` non-null, and both
-remaining stages scope on it — so 5b and 5c can now be built in either order, subject to the
-ordering caveat recorded under 5c.
+5·0, 5a and 5b are shipped. 5a was the only stage that makes `clinician_email` non-null, and every
+remaining stage scopes on it — so 5c can be built whenever, subject to the ordering caveat recorded
+under it.
+
+5b·1 is free of 5b in both directions. It is the only stage that changes the call itself, and 5b is
+written against the protocol as it ships today, so neither blocks the other.
+
+5b·2 needs 5b, and nothing needs 5b·2 — it can be skipped indefinitely, because the band on load is
+the fallback the push degrades to.
 
 5a inherits one simplification from 5·0: the Deployments composer's patient select can show an NHS
 number, because the patients it lists have one.
