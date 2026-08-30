@@ -79,7 +79,13 @@ async def a_row(
     return interview_id
 
 
-async def a_red_flag_on(pool, interview_id: str) -> None:
+async def a_red_flag_on(
+    pool,
+    interview_id: str,
+    *,
+    hit: str = "rf_self_harm",
+    action: str = "end_call",
+) -> None:
     """One `safety.scanned` carrying a red, which is what the `urgent` tile
     counts since Phase 5b.
 
@@ -87,13 +93,18 @@ async def a_red_flag_on(pool, interview_id: str) -> None:
     gate *stopped*, and the tile is now "a red nobody has acknowledged" — a
     fact about `transcript.events` and one column on the interview, so a row
     that claims an outcome and logged no scan is a row nothing raised.
+
+    `hit` has to be a flag the interview's own protocol declares, because the
+    read resolves the action through the pinned version rather than trusting
+    the one in the payload — an id the version does not name resolves to no
+    action at all.
     """
     await pool.execute(
         "insert into transcript.events (interview_id, session_id, seq, type, at, payload) "
         "values ($1, $2, 1, 'safety.scanned', now(), $3) on conflict do nothing",
         interview_id,
         f"sess_tbl_{interview_id}",
-        {"blocked": True, "hits": ["rf_self_harm"], "action": "end_call"},
+        {"blocked": action == "end_call", "hits": [hit], "action": action},
     )
 
 
@@ -141,6 +152,61 @@ async def test_urgency_puts_work_owed_above_recency(live_db):
     page = await reads.interviews(user(), sort="urgency", limit=500)
 
     assert mine(page, made) == [escalated, abandoned, fresh]
+
+
+async def test_urgency_ranks_a_triage_red_by_its_flag_and_not_its_ending(live_db):
+    """A red that let the call finish outranks an abandoned call.
+
+    `urgent_escalate` does not stop the interview, so the row is
+    `completed / complete` and its ending says nothing about how grave it is.
+    Ranking on `i.outcome = 'safety'` alone put it below every abandoned call
+    — while the escalation band, which ranks on the flag's action, was pointing
+    a clinician straight at it. The band and the table it links into were
+    ordering the same call by two different facts.
+    """
+    triage = await a_row(
+        live_db, "u_triage", protocol_id="proto_preop_check_v1", minutes_ago=900
+    )
+    await a_red_flag_on(
+        live_db, triage, hit="rf_anticoagulant_taken", action="urgent_escalate"
+    )
+    abandoned = await a_row(
+        live_db, "u_triage_left", status="abandoned", outcome="patient_left", minutes_ago=300
+    )
+    fresh = await a_row(live_db, "u_triage_fresh", minutes_ago=1)
+    made = {triage, abandoned, fresh}
+
+    page = await reads.interviews(user(), sort="urgency", limit=500)
+
+    assert mine(page, made) == [triage, abandoned, fresh]
+
+
+async def test_urgency_keeps_a_red_up_the_table_once_it_is_acknowledged(live_db):
+    """Taking a call says somebody has it, not that it has been read.
+
+    The band clears on acknowledgement and the `urgent` tile drops it, both
+    deliberately. The sort does not: the table is where the reading happens, so
+    a row that fell to the bottom the moment it was claimed would be hidden
+    from the person who claimed it.
+    """
+    taken = await a_row(
+        live_db, "u_taken", protocol_id="proto_preop_check_v1", minutes_ago=900
+    )
+    await a_red_flag_on(
+        live_db, taken, hit="rf_anticoagulant_taken", action="urgent_escalate"
+    )
+    await live_db.execute(
+        "update clinical.interviews set acknowledged_at = now(), acknowledged_by = $2 "
+        "where id = $1",
+        taken,
+        ALICE,
+    )
+    fresh = await a_row(live_db, "u_taken_fresh", minutes_ago=1)
+    made = {taken, fresh}
+
+    page = await reads.interviews(user(), sort="urgency", limit=500)
+
+    assert mine(page, made) == [taken, fresh]
 
 
 async def test_the_order_breaks_ties_so_paging_cannot_repeat_a_row(live_db):

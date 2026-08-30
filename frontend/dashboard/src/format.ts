@@ -46,12 +46,25 @@ export function elapsed(iso: string, now: Date = new Date()): string {
   return hours ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
 }
 
-/** The gap between two contacts, as the timeline's spine labels it. */
-export function gap(fromIso: string, toIso: string): string {
-  const days = Math.round(
-    (new Date(toIso).getTime() - new Date(fromIso).getTime()) / 86_400_000,
-  );
-  if (days < 14) return `${Math.max(days, 0)}d`;
+/**
+ * The gap between two contacts, as the timeline's spine labels it — or null
+ * when there is no interval to label.
+ *
+ * Days were the only unit, so two calls the same day read `0d`: a label that
+ * breaks the spine to say nothing happened between them, which is exactly what
+ * a duration is not. Below a day it now says the duration it actually was, and
+ * two calls inside a minute of each other get no label at all rather than a
+ * rounded-down zero.
+ */
+export function gap(fromIso: string, toIso: string): string | null {
+  const ms = new Date(toIso).getTime() - new Date(fromIso).getTime();
+  const mins = Math.round(ms / 60_000);
+  if (mins < 1) return null;
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(ms / 86_400_000);
+  if (days < 14) return `${days}d`;
   if (days < 60) return `${Math.round(days / 7)}w`;
   return `${Math.round(days / 30)}mo`;
 }
@@ -77,6 +90,37 @@ const FLAG_WORDS: Record<RedFlagAction, string> = {
 };
 
 /**
+ * Which of those actions is *red* — the same set `reads.RED_ACTIONS` derives
+ * from `SEVERITY`, restated here because the ladder is Python and never crossed
+ * into `shared/contracts`.
+ *
+ * Written as an exhaustive `Record` rather than an array so a re-authored flag
+ * set cannot add an action that silently lands on the wrong side of the line:
+ * `tsc` will not compile the new action until this file says which it is.
+ */
+const RED: Record<RedFlagAction, boolean> = {
+  end_call: true,
+  urgent_escalate: true,
+  soft_review: false,
+  note_only: false,
+};
+
+/**
+ * Whether this row is one of the reds the band and the `urgent` tile count.
+ *
+ * Red is the flag's **action**, never the outcome. `outcome === 'safety'` is
+ * only the flag that *stopped* the call; an `urgent_escalate` lets the
+ * conversation run to the end, so the row arrives here as
+ * `completed / complete` and every branch below that asked `outcome` alone
+ * drew it yellow — while `reads.py` had already been moved onto
+ * `UNACKNOWLEDGED_RED` and was counting it red. The band said red, the screen
+ * it linked to said flagged, and they were describing the same call.
+ */
+export function isRed(row: InterviewSummary): boolean {
+  return row.worstFlag !== null && RED[row.worstFlag];
+}
+
+/**
  * The gate's finding, as a clause — or null when it found nothing, which is
  * most calls and is itself the useful answer.
  *
@@ -97,10 +141,14 @@ export function flags(row: InterviewSummary): string | null {
 export function outcome(row: InterviewSummary): Outcome {
   const said = narrate(row);
   const raised = flags(row);
+  // `urgent` is the flag's own answer, not the ending's: a call the gate
+  // flagged and let finish still owes a clinician a decision, and this is what
+  // puts the red treatment on its row.
+  const urgent = said.urgent || isRed(row);
   // The safety row's own copy already says what stopped it; two sentences for
   // one flag is two sentences to disagree.
-  if (!raised || row.outcome === 'safety') return said;
-  return { ...said, detail: `${said.detail} · ${raised}` };
+  if (!raised || row.outcome === 'safety') return { ...said, urgent };
+  return { ...said, urgent, detail: `${said.detail} · ${raised}` };
 }
 
 /**
@@ -161,7 +209,11 @@ function narrate(row: InterviewSummary): Outcome {
 export type PillKind = 'danger' | 'accent' | 'warn' | 'faint' | '';
 
 export function statusPill(row: InterviewSummary): { label: string; kind: PillKind } {
-  if (row.outcome === 'safety') return { label: 'urgent review', kind: 'danger' };
+  // Red first, and from the flag rather than the ending — `outcome === 'safety'`
+  // stays because a stopped call is red even if its scan rows are unreadable,
+  // but it is no longer the only way in. Yellow below is now what it says it
+  // is: the gate found something that does not owe anybody a decision.
+  if (row.outcome === 'safety' || isRed(row)) return { label: 'urgent review', kind: 'danger' };
   // A completed call the gate flagged is not the same errand as a completed
   // call it cleared, and the pill is what the eye reads first.
   if (row.status === 'completed' && row.flagCount > 0) return { label: 'flagged', kind: 'warn' };

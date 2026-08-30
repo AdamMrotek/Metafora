@@ -35,7 +35,7 @@ DEMO_PROTOCOL_ID = os.environ.get("DEMO_PROTOCOL_ID", "proto_warmup_v1")
 #: blocker 6), and it is why those ten have an NHS number and a date of birth
 #: while a minted one does not.
 DEMO_NAMES = (
-    "Alice", "Ben", "Chloe", "Dev", "Erin", "Femi", "Greta", "Hari",
+    "Alice", "Ben", "Chloe", "Dev", "Erin", "Femi", "Gwen", "Hari",
     "Iris", "Jonas", "Kira", "Leo", "Maya", "Nadia", "Omar", "Priya",
     "Quinn", "Rosa", "Sam", "Tara", "Umar", "Vera", "Wes", "Zoe",
 )

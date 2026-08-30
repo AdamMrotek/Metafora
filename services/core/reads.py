@@ -62,23 +62,6 @@ QUEUED_LIMIT = 50
 #: nothing.
 _ACTIVITY = "coalesce(i.ended_at, i.started_at, i.scheduled_for, i.created_at)"
 
-#: Triage order, and it is a clinical ordering rather than a display preference:
-#: an escalation from yesterday outranks a completed call from ten minutes ago,
-#: because the table exists to be worked through rather than browsed. Lifted
-#: verbatim from what `screens/Dashboard.tsx` used to compute in the browser —
-#: moved, not reinterpreted.
-_URGENCY = """
-    case when i.outcome = 'safety'    then 0
-         when i.status  = 'abandoned' then 1
-         else 2 end
-"""
-
-#: What the two sort options mean, as SQL. `i.id` breaks every tie, because a
-#: paged query with an unstable order can show one row twice and another never.
-_ORDER: dict[str, str] = {
-    "urgency": f"{_URGENCY} asc, {_ACTIVITY} desc, i.id desc",
-    "recent": f"{_ACTIVITY} desc, i.id desc",
-}
 
 def _search(n: int) -> str:
     """The review table's search box, as a predicate on parameter `n`.
@@ -193,6 +176,48 @@ _RED = ", ".join(f"'{action}'" for action in RED_ACTIONS)
 #: `running` included: a triage flag exists the moment the gate scans, and the
 #: call then runs on for minutes. The clock starts at the scan, not the hangup.
 UNACKNOWLEDGED_RED = f"(g.worst_flag in ({_RED}) and i.acknowledged_at is null)"
+
+#: A red row, for the one purpose that is an *ordering* rather than a count.
+#:
+#: Two ways in, and they are not redundant. `g.worst_flag` is what the gate
+#: actually raised, which is the only thing that finds a triage red — those let
+#: the call run to the end, so the row arrives here `completed / complete` and
+#: nothing about its ending says it is grave. `i.outcome = 'safety'` is the
+#: ending itself, kept because a call the gate stopped is red whether or not
+#: its scan rows can be read, and a sort is the safe place to be generous: a
+#: row ranked too high is seen too early, which is the failure worth having.
+#: `UNACKNOWLEDGED_RED` deliberately does *not* take the outcome clause — the
+#: tile and the band are a claim about how many, and a count that admits a row
+#: the band cannot list is invariant 4 again.
+_RED_ROW = f"(i.outcome = 'safety' or g.worst_flag in ({_RED}))"
+
+#: Triage order, and it is a clinical ordering rather than a display preference:
+#: an escalation from yesterday outranks a completed call from ten minutes ago,
+#: because the table exists to be worked through rather than browsed. Lifted
+#: from what `screens/Dashboard.tsx` used to compute in the browser.
+#:
+#: Rank 0 was `i.outcome = 'safety'` alone, which is only the flag that
+#: *stopped* the call. A triage red sorted 2 — below an abandoned call — so the
+#: row the band was pointing at could sit most of a page down the table it links
+#: into. Red is the flag's action here for the same reason it is everywhere
+#: else in this file.
+#:
+#: Acknowledgement is not in it. Taking a call says somebody has it, not that it
+#: has been read, and the table is the reading — a row that dropped to the
+#: bottom the moment it was claimed would be hidden from the person who claimed
+#: it. The band clears; the sort does not.
+_URGENCY = f"""
+    case when {_RED_ROW}              then 0
+         when i.status  = 'abandoned' then 1
+         else 2 end
+"""
+
+#: What the two sort options mean, as SQL. `i.id` breaks every tie, because a
+#: paged query with an unstable order can show one row twice and another never.
+_ORDER: dict[str, str] = {
+    "urgency": f"{_URGENCY} asc, {_ACTIVITY} desc, i.id desc",
+    "recent": f"{_ACTIVITY} desc, i.id desc",
+}
 
 #: What the gate found, per interview. `transcript.events` holds a
 #: `safety.scanned` for every committed turn — including the ones that matched

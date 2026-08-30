@@ -22,11 +22,20 @@ export function Interview({ id }: { id: string }) {
 
   useEffect(() => {
     let live = true;
-    setDetail(null);
     setError(null);
+    // The previous interview stays on screen while the next one loads. Blanking
+    // it to "Reading the interview…" was fine when this screen was only ever
+    // arrived at from the table; now that the strip below steps between a
+    // patient's calls, it made every step a full-page flash.
     get<InterviewDetail>(`/interviews/${id}`)
       .then((value) => live && setDetail(value))
-      .catch((e: Error) => live && setError(e.message));
+      .catch((e: Error) => {
+        if (!live) return;
+        // A row that cannot be read must not leave the last one showing under
+        // the error, which would read as its explanation.
+        setDetail(null);
+        setError(e.message);
+      });
     return () => {
       live = false;
     };
@@ -48,6 +57,10 @@ export function Interview({ id }: { id: string }) {
   if (!detail) return <p className="note">Reading the interview…</p>;
 
   const row = detail.interview;
+  // Between a click on the strip and that interview arriving. Derived from the
+  // row rather than kept as a second piece of state, so it cannot disagree with
+  // what is actually drawn.
+  const opening = row.id !== id;
   const said = outcome(row);
   const pill = statusPill(row);
   // Fetched with the interview rather than filtered out of the dashboard's
@@ -69,7 +82,7 @@ export function Interview({ id }: { id: string }) {
         </span>
       </div>
 
-      <div className="dhead">
+      <div className={opening ? 'dhead is-stale' : 'dhead'} aria-busy={opening}>
         <span>
           <span className="dhead__n">{row.patientFirstName}</span>
           <span className="dhead__s">
@@ -95,9 +108,12 @@ export function Interview({ id }: { id: string }) {
         </span>
       </div>
 
-      <Timeline history={history} currentId={row.id} />
+      {/* The route's id, not the loaded row's: the lit node moves the instant
+          it is clicked, and the content catches up under it. The strip is the
+          navigation, so it is the one thing here that never dims. */}
+      <Timeline history={history} currentId={id} />
 
-      <div className="panes">
+      <div className={opening ? 'panes is-stale' : 'panes'} aria-busy={opening}>
         <Transcript detail={detail} />
         <Composer detail={detail} summary={said.title} />
       </div>
@@ -110,6 +126,17 @@ export function Interview({ id }: { id: string }) {
  * Real: it is every interview this patient has, from the list already loaded.
  * The gaps between a patient's contacts are clinical signal, which is the whole
  * reason this is a timeline and not five equal cards.
+ *
+ * Every item but the current one is a link to that interview, which is the
+ * shortest path between two calls of the same patient — the strip already knew
+ * which they were and drew them in order, and the only way to open one was to
+ * go back to the review table and find it again by name.
+ *
+ * The anchor wraps the item's *content* rather than the item itself: the node
+ * and the interval are the spine, shared between neighbours, and a link that
+ * swallowed them would claim half the gap before it as its own. It also keeps
+ * `listitem` on the item, so the anchor is announced as a link rather than
+ * having its role overwritten by the one the list needs.
  */
 function Timeline({
   history,
@@ -123,24 +150,55 @@ function Timeline({
   return (
     <div className="tl" role="list" aria-label="Interview history, oldest first">
       {history.map((row, i) => {
-        const previous = history[i - 1];
         const at = row.endedAt ?? row.createdAt;
+        // The interval *ahead* of this node, not behind it. `.tl__gap` is
+        // centred on the item, and an item's span runs from its own node to the
+        // next one — so the label a node carries is the one it is sitting at
+        // the start of. Measuring backwards drew every interval a slot to the
+        // right of itself, and the last item's label landed past the final node
+        // on the 6px stub of spine, with nothing on either side of it.
+        // `docs/ux/clinical-dashboard.html:1073` has it forwards: a label on
+        // the first item and none on the last.
+        const next = history[i + 1];
+        // Null when there is no interval worth a word — see `gap`.
+        const until = next ? gap(at, next.endedAt ?? next.createdAt) : null;
         const now = row.id === currentId;
         const pill = statusPill(row);
-        return (
-          <span className={now ? 'tl__i tl__i--now' : 'tl__i'} role="listitem" key={row.id}>
-            <span className="tl__node" />
-            {previous && (
-              <span className="tl__gap">{gap(previous.endedAt ?? previous.createdAt, at)}</span>
-            )}
-            <span className="tl__d">
-              {new Date(at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-            </span>
+        const when = new Date(at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+        const body = (
+          <>
+            <span className="tl__d">{when}</span>
             <span className="tl__p">{row.protocolLabel}</span>
             <span className={pill.kind ? `pill pill--${pill.kind}` : 'pill'}>
               {pill.kind === 'danger' && <span className="pill__d" />}
               {pill.label}
             </span>
+          </>
+        );
+        return (
+          <span
+            className={now ? 'tl__i tl__i--now' : 'tl__i'}
+            role="listitem"
+            // The one being read, for anyone who cannot see which node is lit.
+            aria-current={now ? 'true' : undefined}
+            key={row.id}
+          >
+            <span className="tl__node" />
+            {until && <span className="tl__gap">{until}</span>}
+            {now ? (
+              <span className="tl__go">{body}</span>
+            ) : (
+              // The date and the protocol are the whole label: two interviews a
+              // patient had on the same script are told apart by when, and the
+              // strip is ordered so "older" and "newer" are already on screen.
+              <Link
+                className="tl__go"
+                to={`/interviews/${row.id}`}
+                aria-label={`Open the ${row.protocolLabel} of ${when}`}
+              >
+                {body}
+              </Link>
+            )}
             {now && <span className="tl__owed">Awaiting your review</span>}
           </span>
         );

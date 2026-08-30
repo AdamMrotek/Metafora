@@ -248,6 +248,21 @@
   position:relative; flex:1 0 172px; min-width:172px; padding:var(--s-6) var(--s-5) 0 0;
   display:flex; flex-direction:column; align-items:flex-start; gap:6px;
 }
+/* the item's content, and — on every item but the one being read — the link to
+   it. The node and the interval stay outside: they are the spine, shared with
+   the neighbour, and a hit area that covered them would sit on the gap. */
+.tl__go{display:flex; flex-direction:column; align-items:flex-start; gap:6px; color:inherit}
+a.tl__go{
+  text-decoration:none;
+  border-radius:var(--r-xs); margin:-4px -6px; padding:4px 6px;
+  transition:background .12s var(--ease);
+}
+/* the same hover the review table's rows use, because it is the same promise:
+   this whole thing opens. */
+a.tl__go:hover{background:var(--inset)}
+a.tl__go:hover .tl__d{color:var(--fg-3)}
+a.tl__go:hover .tl__p{color:var(--fg)}
+.tl__i:has(a.tl__go:hover) .tl__node{border-color:var(--accent)}
 /* one spine segment per item, so it survives horizontal scrolling */
 .tl__i::before{content:""; position:absolute; top:6px; left:0; right:0; height:1px; background:var(--line-strong)}
 .tl__i:first-child::before{left:6px}
@@ -273,7 +288,10 @@
    It is deliberately NOT the escalation treatment: no clock, no pulse, no
    danger gradient. Tier 1 stays exclusive to the band and the urgent pill this
    item already carries. This is emphasis, which is a different job. */
-.tl__i--now{padding-right:0}
+/* only when it is also the terminus. The strip steps between calls now, so the
+   lit item can be one in the middle, and dropping its right padding there would
+   set it at a different width from the items either side of it. */
+.tl__i--now:last-child{padding-right:0}
 .tl__i--now .tl__node{
   width:17px; height:17px; top:-2px; border:0; background:var(--sweep);
   box-shadow:0 0 0 4px var(--accent-soft);
@@ -289,6 +307,11 @@
 @media (max-width:860px){
   .tl__i,.tl__i--now{flex:0 0 150px}
 }
+
+/* Showing the interview you just left while the one you asked for loads. It is
+   held rather than blanked because the strip above is a step, not a departure —
+   but it is dimmed, because the words under a moved marker are the old ones. */
+.is-stale{opacity:.5; transition:opacity .12s var(--ease)}
 
 /* ══════════════════════════════════════════════════════════════════════════
    THE REVIEW COMPOSER, PROMOTED
@@ -330,7 +353,7 @@
 .lg--neu i{background:var(--px-neu)}
 
 @media (prefers-reduced-motion:reduce){
-  .seg__b,.tip,.icon-btn,.copy__ok{transition:none}
+  .seg__b,.tip,.icon-btn,.copy__ok,.tl__go,.is-stale{transition:none}
 }
 
 @media (max-width:860px){

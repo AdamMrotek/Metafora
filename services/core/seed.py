@@ -230,6 +230,58 @@ CALLS: tuple[Call, ...] = (
             "anything_else": "Nothing raised",
         },
     ),
+    # ── two reds on one call ─────────────────────────────────────────────────
+    #
+    # The case the acknowledgement is shaped around and the only one the rest of
+    # this file leaves undrawn. `clinical.interviews.acknowledged_at` is per
+    # interview and not per flag because "I have this" is a statement about the
+    # call, so a call carrying two reds is one line on the band and is cleared
+    # once — and a seed where every flagged call carries exactly one flag can
+    # demonstrate that claim but never exercise it.
+    #
+    # Both are `urgent_escalate`, so neither stopped the call: the interview
+    # still ran to the end and its outcome is `complete`. What makes it a red is
+    # the scan, not the ending.
+    Call(
+        n=18,
+        patient="pt_demo_08",
+        protocol=PREOP,
+        status="completed",
+        outcome="complete",
+        started_ago=timedelta(hours=1, minutes=40),
+        ran=timedelta(minutes=7),
+        turns=(
+            opening("Hari"),
+            a(ATTEND),
+            p("Yes, I'll be there."),
+            a(ESCORT),
+            p("My brother's driving me and staying over."),
+            a(FASTING),
+            p("Nothing from midnight, water until six. Understood."),
+            a(MEDS),
+            p(
+                "No — I'm still taking it. Nobody told me to stop.",
+                "rf_anticoagulant_taken",
+                action="urgent_escalate",
+            ),
+            a(HEALTH),
+            p(
+                "I have had a temperature since the weekend, and a bit of a cough.",
+                "rf_fitness_change",
+                action="urgent_escalate",
+            ),
+            a(CLOSE),
+            p("No, that's everything."),
+        ),
+        captured={
+            "attendance": "Confirmed",
+            "escort_home": "Brother, driving and staying overnight",
+            "fasting_ack": "Understood",
+            "meds_stopped": "Still taking — was not told to stop",
+            "health_change": "Temperature since the weekend, with a cough",
+            "anything_else": "Nothing raised",
+        },
+    ),
     # ── soft_review ──────────────────────────────────────────────────────────
     Call(
         n=4,
@@ -350,7 +402,7 @@ CALLS: tuple[Call, ...] = (
         started_ago=timedelta(hours=1, minutes=10),
         ran=timedelta(minutes=3),
         turns=(
-            opening("Greta"),
+            opening("Gwen"),
             a(ATTEND),
             p("Yes, I think so."),
             a(ESCORT),
