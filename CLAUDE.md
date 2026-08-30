@@ -83,8 +83,19 @@ another to the clinical shell.
 **`tests/`** — mirrors module names (`test_gate.py`, `test_machine.py`, …). `test_auth.py` is in
 plain `make test`: it generates an EC keypair and serves the JWKS from memory, so the real ES256
 path runs with no network and no project. `test_reads.py`, `test_persistence.py`, `test_dispatch.py`,
-`test_invitations.py` and `test_table.py` are behind the `postgres` marker. `tests/e2e/patient.py` needs a live backend and a real key; it is not part of
-`make test`.
+`test_invitations.py` and `test_table.py` are behind the `postgres` marker.
+`tests/e2e/` is everything that needs the real thing running. `patient.py` is a synthetic patient
+over LiveKit — it proves the *media* path and takes a live backend and a real key.
+`test_lifecycle_browser.py` is behind the `browser` marker (`make test-e2e`): `conftest.py` boots an
+SFU, a backend and Vite on their own ports and drives headless Chromium at them. Two properties —
+that a patient who has gone stops costing one of the three concurrency slots, and that a call that
+ends is both *told* to the browser over the data channel and *filed* under why it ended. Only two of
+the seven can fail on their own: `never_connects` (the page-teardown cases pass without the fix they
+look like they cover, because `livekit-client` leaves the room on `pagehide` by itself) and
+`filed_under_why_it_ended`, which is the only one that reaches the ending the pipeline starts —
+where the reason is not settled until `_run`'s `finally` and anything ending the session in that gap
+overwrites it. Check a new test against a deliberately broken build before trusting it. Neither is part of
+`make test`, which stays keyless.
 
 **`docs/`** — the only place prose lives. `system-map.md` = *intended* architecture,
 `agent-review-and-pipecat-decision.md` = why Pipecat/Python. Read only for architectural tasks.

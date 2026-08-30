@@ -22,7 +22,7 @@ C_DIM := \033[2m
 C_OFF := \033[0m
 
 .PHONY: help setup install dev api sfu web stop restart ports \
-        check test lint typecheck imports build contracts e2e dash \
+        check test test-pg test-e2e lint typecheck imports build contracts e2e dash \
         logs latency safety doctor clean guard-env \
         sleep wake fly-status guard-fly
 
@@ -78,9 +78,10 @@ ports: ## Show what is holding the dev ports
 setup: install ## Install everything and create .env from the example
 	@test -f .env || { cp .env.example .env; echo "  created .env — put your GROQ_API_KEY in it"; }
 
-install: ## uv sync + npm install
+install: ## uv sync + npm install + the browser `make test-e2e` drives
 	uv sync
 	npm install
+	uv run playwright install chromium
 
 doctor: ## Check the prerequisites are in place
 	@ok=0; \
@@ -100,10 +101,13 @@ doctor: ## Check the prerequisites are in place
 
 ## ---- checks ----------------------------------------------------------------
 
-check: test lint typecheck ## Everything CI runs except the schema tests (make test-pg — needs Docker)
+check: test lint typecheck ## Everything CI runs except the schema (make test-pg) and browser (make test-e2e) tests
 
 test: ## pytest — no API key, no LiveKit needed
 	uv run pytest
+
+test-e2e: guard-env ## Browser tests — real Chromium, real SFU, real backend
+	uv run pytest -m browser
 
 test-pg: ## Schema tests against a throwaway Postgres in Docker
 	@docker inspect metafora-pg >/dev/null 2>&1 \

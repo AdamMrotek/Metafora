@@ -18,6 +18,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "playwright>=1.62.0",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
@@ -32,10 +33,12 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 # `make test` stays pure — no key, no SFU, no database. Postgres-backed tests
-# opt in via `make test-pg`, which supplies TEST_DATABASE_URL.
-addopts = "-m 'not postgres'"
+# opt in via `make test-pg`, which supplies TEST_DATABASE_URL; browser tests via
+# `make test-e2e`, which boots an SFU, a backend and the portal.
+addopts = "-m 'not postgres and not browser'"
 markers = [
     "postgres: needs a Postgres at TEST_DATABASE_URL (deselected by default)",
+    "browser: drives a real Chromium against a real SFU (deselected by default)",
 ]
 
 [tool.ruff]
