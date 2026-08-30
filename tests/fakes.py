@@ -36,7 +36,14 @@ class FakeTransport:
             await handler(self, *args)
 
     async def disconnect(self) -> None:
+        """Mirrors the real transport, which raises `on_disconnected` on its way
+        down — so the handler that catches a bot whose room went away is
+        exercised on the ordinary teardown path rather than only in production.
+        """
+        if self.disconnected:
+            return
         self.disconnected = True
+        await self.fire("on_disconnected")
 
 
 class FakeWire:

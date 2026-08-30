@@ -77,6 +77,14 @@ export function useCall() {
   const roomRef = useRef<Room | null>(null);
   const drainRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backstopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Enough to hang the call up from anywhere, held in a ref rather than read
+   * off `state`: `hangUp` has to keep one identity for the life of the hook —
+   * the unmount effect and the `pagehide` listener are hung off it — and a
+   * `hangUp` that changed when the session arrived would end the call it just
+   * started.
+   */
+  const endpointRef = useRef<{ sessionId: string; machineId?: string } | null>(null);
   const [state, setState] = useState<CallState>({
     phase: 'idle',
     bubbles: [],
@@ -89,10 +97,23 @@ export function useCall() {
   });
 
   /**
-   * Close the line: the microphone and the room both.
+   * Close the line: the microphone, the room, *and* the session on the server.
+   *
+   * The third is not redundant. Dropping the transport only tells the SFU, and
+   * the SFU only tells the bot once ICE has failed — tens of seconds during
+   * which a pipeline keeps running and holds one of very few concurrency slots.
+   * A tab that is killed outright never gets to send even that: `room.disconnect()`
+   * is async and the browser is under no obligation to let it finish. So the
+   * authoritative signal is an explicit `POST /end`, sent `keepalive` so it
+   * survives the unload that fired it.
+   *
+   * `keepalive` rather than `navigator.sendBeacon` because the session lives in
+   * one backend process's memory and only a header can route back to it; a
+   * beacon cannot set one.
    *
    * Safe to call twice — the room is cleared before it is disconnected, so the
-   * Disconnected event this raises does not come back round for a second go.
+   * Disconnected event this raises does not come back round for a second go,
+   * and `teardown` is idempotent for a session that has already ended.
    */
   const hangUp = useCallback(() => {
     for (const ref of [drainRef, backstopRef]) {
@@ -102,13 +123,36 @@ export function useCall() {
       }
     }
     mic.release();
+
+    const endpoint = endpointRef.current;
+    endpointRef.current = null;
+    if (endpoint) {
+      void fetch(`/api/session/${endpoint.sessionId}/end`, {
+        method: 'POST',
+        keepalive: true,
+        headers: endpoint.machineId ? { 'fly-force-instance-id': endpoint.machineId } : {},
+        // The call is over either way; a failed hangup must not throw into an
+        // unload handler or a React cleanup.
+      }).catch(() => {});
+    }
+
     const room = roomRef.current;
     roomRef.current = null;
     void room?.disconnect();
   }, [mic]);
 
-  // Leaving the screen mid-call ends the call.
-  useEffect(() => hangUp, [hangUp]);
+  // Leaving the screen mid-call ends the call — whether that is React
+  // unmounting the hook or the browser tearing the whole page down. `pagehide`
+  // rather than `beforeunload` because it is the one that fires on a mobile tab
+  // being discarded, which is the case the server was waiting fifteen minutes
+  // for.
+  useEffect(() => {
+    window.addEventListener('pagehide', hangUp);
+    return () => {
+      window.removeEventListener('pagehide', hangUp);
+      hangUp();
+    };
+  }, [hangUp]);
 
   const apply = useCallback(
     (message: ServerMessage) => {
@@ -183,6 +227,10 @@ export function useCall() {
       };
 
       // ── 3 · the room ──
+      // Recorded before connecting, not after: everything below here can fail,
+      // and a session this side cannot name is a session it cannot hang up.
+      endpointRef.current = { sessionId: session.sessionId, machineId: session.machineId };
+
       const room = new Room();
       roomRef.current = room;
 

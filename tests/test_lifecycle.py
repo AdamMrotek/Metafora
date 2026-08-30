@@ -97,6 +97,60 @@ async def test_patient_leaving_ends_the_call(bots):
     assert session.ended_reason == "patient_left"
 
 
+async def test_a_patient_who_never_arrives_does_not_hold_the_room(bots, monkeypatch):
+    """`POST /session` returning is not the patient joining.
+
+    A tab closed or reloaded between the two — or a `room.connect()` that failed
+    in the browser — used to leave a bot, a pipeline task and one of three
+    concurrency slots held for a room nobody would ever enter, until
+    `MAX_CALL_SECONDS` noticed fifteen minutes later.
+    """
+    monkeypatch.setattr(lifecycle, "PATIENT_TIMEOUT_S", 0)
+
+    async with client() as http:
+        session_id = (await start(http)).json()["session"]["sessionId"]
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if store.get_session(session_id).ended:
+                break
+
+    session = store.get_session(session_id)
+    assert session.ended is True
+    assert session.ended_reason == "patient_never_joined"
+    assert store.live_sessions() == []
+
+
+async def test_a_patient_who_arrives_is_not_hung_up_on(bots, monkeypatch):
+    """The counterpart: joining cancels the arrival watchdog, so a call in
+    progress is never ended by the thing that exists to close empty rooms.
+    """
+    monkeypatch.setattr(lifecycle, "PATIENT_TIMEOUT_S", 0)
+
+    async with client() as http:
+        session_id = (await start(http)).json()["session"]["sessionId"]
+        await bots.latest.transport.fire(
+            "on_first_participant_joined", {"identity": "patient-pt_alice"}
+        )
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+        assert store.get_session(session_id).ended is False
+
+
+async def test_the_bots_own_transport_going_down_ends_the_call(bots):
+    """The floor under `on_participant_disconnected`. That fires only when the
+    SFU tells us a participant left; if our own transport is what went away,
+    nothing else would ever notice the call is over.
+    """
+    async with client() as http:
+        session_id = (await start(http)).json()["session"]["sessionId"]
+        await bots.latest.transport.fire("on_disconnected")
+
+    session = store.get_session(session_id)
+    assert session.ended is True
+    assert session.ended_reason == "transport_closed"
+
+
 async def test_drain_ends_every_live_call(bots):
     """A restart drops every call on the box, so the goodbye is the difference
     between a patient hearing a sentence and hearing silence.
@@ -121,6 +175,8 @@ async def test_drain_ends_every_live_call(bots):
         ("safety", "safety"),
         ("server_shutdown", "interrupted"),
         ("max_duration", "interrupted"),
+        ("patient_never_joined", "interrupted"),
+        ("transport_closed", "interrupted"),
         ("pipeline_finished", "error"),
     ],
 )

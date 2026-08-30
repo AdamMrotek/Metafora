@@ -86,15 +86,18 @@ async def fresh_state():
 
     yield
 
-    for task in [*lifecycle._tasks.values(), *lifecycle._watchdogs.values()]:
+    pending = [
+        *lifecycle._tasks.values(),
+        *lifecycle._watchdogs.values(),
+        *lifecycle._arrivals.values(),
+    ]
+    for task in pending:
         task.cancel()
     # Let the cancellations actually land before the next test starts a call.
-    await asyncio.gather(
-        *[*lifecycle._tasks.values(), *lifecycle._watchdogs.values()],
-        return_exceptions=True,
-    )
+    await asyncio.gather(*pending, return_exceptions=True)
     lifecycle._tasks.clear()
     lifecycle._watchdogs.clear()
+    lifecycle._arrivals.clear()
     session_routes._starts._buckets.clear()
     store._sessions.clear()
 
