@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { InterviewSummary } from '@metafora/contracts';
+import { CopyLink } from '../CopyLink.tsx';
 import { useRecord } from '../data.tsx';
 import {
   activityAt,
@@ -101,8 +102,9 @@ export function Dashboard() {
           same rows, never a second source — both read `outcome`.
 
           The spec's third tile is "Expiring · 48h", which counts invitation
-          windows. `clinical.invitations` is Phase 5, so the slot carries a
-          number that exists instead of one that does not. */}
+          windows. `clinical.invitations` exists since Phase 5a, but a link
+          nearing its expiry is not work owed — the other two are — so the slot
+          keeps the number a clinician has to act on. */}
       <div className="stats">
         <span className="stat stat--urgent">
           <span className="stat__n">{urgent}</span>
@@ -298,9 +300,11 @@ function Row({ row }: { row: InterviewSummary }) {
 }
 
 /**
- * What is still out. Real, and empty until Phase 5 dispatches anything —
- * `scheduled_for` is only written by a clinician queueing a call, and nothing
- * queues one yet. The empty state says that rather than showing a blank card.
+ * What is still out: every call queued and not yet started.
+ *
+ * The copy button lives here and nowhere else in the review path, because these
+ * are the only rows for which a link means anything — it is spent the moment
+ * the call begins, so a completed interview has nothing to copy.
  */
 function Scheduled() {
   const { interviews } = useRecord();
@@ -318,7 +322,8 @@ function Scheduled() {
       {upcoming.length === 0 ? (
         <p className="note">
           <b>Nothing is out</b>
-          Queueing a call to a patient is dispatch, which arrives with the Deployments screen.
+          Queue a call to a patient on the Deployments screen and it waits here until they take
+          it.
         </p>
       ) : (
         <div className="card__grid">
@@ -332,12 +337,18 @@ function Scheduled() {
               </span>
               <span className="item__s">
                 {row.protocolLabel} · invited, not started
+                <CopyLink
+                  interviewId={row.id}
+                  label={`Copy ${row.patientFirstName}’s link`}
+                />
               </span>
             </div>
           ))}
         </div>
       )}
-      <div className="card__f">Manage in Deployments →</div>
+      <div className="card__f">
+        <Link to="/deployments">Manage in Deployments →</Link>
+      </div>
     </div>
   );
 }

@@ -7,8 +7,11 @@ role at the door and then runs an unscoped query has no place to put the second
 one when it is needed. Today the scope is one predicate (`OWNED_BY`); when it
 becomes a relationship it becomes a longer predicate in the same place.
 
-Reads only. `services/core/store.py` and `queue.py` own every write to these
-tables, and the dashboard never writes.
+Reads only. The writers are named and there are four of them: `store.py` closes
+an interview and records what it captured, `queue.py` claims one, `dispatch.py`
+creates one, and `invitations.py` mints and spends its link. Nothing in this
+file writes, and the dashboard reaches the last two through their own routes
+rather than through a query here.
 """
 
 from typing import Any
@@ -145,6 +148,24 @@ async def interviews(user: CurrentUser, *, limit: int | None = None) -> list[Int
     return [InterviewSummary.model_validate(dict(r)) for r in rows]
 
 
+async def summary(user: CurrentUser, interview_id: str) -> InterviewSummary:
+    """One row of the review table, on its own.
+
+    Split out of `interview()` so that `dispatch.py` can answer with the shape
+    the table already draws without assembling a second one — the row a
+    clinician sees the instant they queue a call has to be the same row they see
+    after a reload, and one query is how that stays true.
+    """
+    row = await _pool().fetchrow(
+        f"select {_SUMMARY_COLUMNS} {_SUMMARY_FROM} where {OWNED_BY} and i.id = $2",
+        user.email,
+        interview_id,
+    )
+    if row is None:
+        raise NotFound(interview_id)
+    return InterviewSummary.model_validate(dict(row))
+
+
 async def interview(user: CurrentUser, interview_id: str) -> InterviewDetail:
     """One interview, its captured fields, and its transcript.
 
@@ -153,14 +174,8 @@ async def interview(user: CurrentUser, interview_id: str) -> InterviewDetail:
     dashboard's detail screen is specified on them — a route that dropped them
     could not be un-dropped from the UI.
     """
+    row = await summary(user, interview_id)
     pool = _pool()
-    row = await pool.fetchrow(
-        f"select {_SUMMARY_COLUMNS} {_SUMMARY_FROM} where {OWNED_BY} and i.id = $2",
-        user.email,
-        interview_id,
-    )
-    if row is None:
-        raise NotFound(interview_id)
 
     results = await pool.fetch(
         "select field_key, label, value, status, updated_at "
@@ -173,7 +188,7 @@ async def interview(user: CurrentUser, interview_id: str) -> InterviewDetail:
         interview_id,
     )
     return InterviewDetail(
-        interview=InterviewSummary.model_validate(dict(row)),
+        interview=row,
         results=[ResultField.model_validate(dict(r)) for r in results],
         events=[TranscriptEvent.model_validate(dict(e)) for e in events],
     )

@@ -26,7 +26,11 @@ patient's and holds no credential, `interviews.py` + `patients.py` + `me.py` are
 and every route is behind `require_role`. `lifecycle.py` is the call itself (join, speak, teardown, drain), shared by the
 session router and `lifespan`. `store.py` live session handles here, the durable record in
 Postgres · `reads.py` the dashboard's SQL, every function taking a `CurrentUser` · `db.py` the only
-pool · `tokens.py` LiveKit tokens · `config.py` env · `queue.py` dispatch (`resolve_interview`).
+pool · `tokens.py` LiveKit tokens · `config.py` env · `queue.py` arrival (`resolve_interview`:
+a token, or the demo) · `dispatch.py` queueing a call for a named person, the only writer of
+`clinical.patients.clinician_email` · `invitations.py` the link, whose token is *derived* from
+`(interview_id, nonce)` under `INVITE_SECRET` rather than drawn, so a second copy returns the link
+already sent and the table still stores only its hash.
 
 **`services/agent/`** — the conversation.
 - `pipeline.py` — assembles the Pipecat pipeline. **Start here** for anything about call flow.
@@ -47,6 +51,8 @@ about this repo: `app.py`'s `lifespan` hands it its issuer, its keys and its dir
 
 **`supabase/migrations/`** — the schema, applied. Four schemas (`clinical`, `transcript`,
 `config`, `metrics`); `config.protocols` and `transcript.events` are append-only by trigger.
+`clinical.invitations` deliberately is **not** — `opened_at` and `revoked_at` are the point of it,
+and a record that cannot record that a link was spent cannot refuse the second use.
 `config.accounts` is **seeded by a migration, never by the application** — signing up must not be
 the same act as being granted a caseload. Two more seeds, same rule: the ten-patient demo roster
 (`clinical.patients`, with a `nhs_number` CHECK that admits only NHS England's 999 test range, so
@@ -58,8 +64,9 @@ runs them against a throwaway Postgres.
 
 **`frontend/dashboard/src/`** — clinician portal, the read path (`:5174`). `main.tsx` boots in one
 order that cannot be reshuffled: `/config` → Supabase client → `GET /me` → the app. `api.ts` is
-every read, `data.tsx` fetches the two lists once and shares them, `router.tsx` is forty lines
-over `pushState`, `screens/` is the three screens. **`demo.ts` is every value on the screen that
+every request (`get`, and `post` for dispatch), `data.tsx` fetches the two lists once and shares
+them, `router.tsx` is forty lines over `pushState`, `screens/` is the four screens, `CopyLink.tsx`
+mints and copies a patient's link. **`demo.ts` is every value on the screen that
 no query produced** — now only the referral reason, the consent chip and the ledger hashes,
 deterministic from a real id, and the last file Phase 5 has to delete; NHS numbers, DOB and the
 experience chart became seeded rows in Phase 5·0 and are formatted by `format.ts` like any other
@@ -72,15 +79,15 @@ another to the clinical shell.
 
 **`tests/`** — mirrors module names (`test_gate.py`, `test_machine.py`, …). `test_auth.py` is in
 plain `make test`: it generates an EC keypair and serves the JWKS from memory, so the real ES256
-path runs with no network and no project. `test_reads.py` and `test_persistence.py` are behind the
-`postgres` marker. `tests/e2e/patient.py` needs a live backend and a real key; it is not part of
+path runs with no network and no project. `test_reads.py`, `test_persistence.py`, `test_dispatch.py` and
+`test_invitations.py` are behind the `postgres` marker. `tests/e2e/patient.py` needs a live backend and a real key; it is not part of
 `make test`.
 
 **`docs/`** — the only place prose lives. `system-map.md` = *intended* architecture,
 `agent-review-and-pipecat-decision.md` = why Pipecat/Python. Read only for architectural tasks.
 
-**Does not exist yet** (don't go looking): the studio app in `system-map.md` is unbuilt, and so
-is everything the dashboard *writes* — dispatch, escalations, the signature ledger (all Phase 5).
+**Does not exist yet** (don't go looking): the studio app in `system-map.md` is unbuilt; dispatch
+shipped at Phase 5a, but escalations and the signature ledger (5b, 5c) have not.
 `docs/ux/*.html` are frozen specs, not running code. Audio recording/retention is unbuilt —
 `store-media` in `system-map.md` is its intended home; clinical-research regulation may require it.
 
@@ -98,7 +105,8 @@ is everything the dashboard *writes* — dispatch, escalations, the signature le
    **parameter**, so identity reaches the SQL and not just the door. A system that checks the role
    at the door and then queries unscoped is the one that cannot be retrofitted.
 5. A patient never holds a credential. `POST /session` and its two siblings are unauthenticated by
-   design; that is why the routers are split by audience.
+   design; that is why the routers are split by audience. An invitation token is not a credential:
+   it names one interview, is spent when that call starts, and grants nothing else.
 
 ## Conventions
 
@@ -109,8 +117,8 @@ clinician's sign-in — which the dashboard's *browser* makes directly, with the
 `/config` hands it, so it is the same egress and not a fourth — and
 Sentry for failures — which carries no part of the product by construction, because `app.py`
 gives it no request bodies and drops anything raised inside `services/agent/`.
-`GROQ_API_KEY` is the one env var `make dev` requires; `DATABASE_URL` and `SUPABASE_URL` are both
-optional in dev and required outside it (`Dockerfile` + `fly.toml` deploy the backend, and
+`GROQ_API_KEY` is the one env var `make dev` requires; `DATABASE_URL`, `SUPABASE_URL`,
+`PORTAL_URL` and `INVITE_SECRET` are all optional in dev and required outside it (`Dockerfile` + `fly.toml` deploy the backend, and
 `config.py` names every secret it refuses to boot without) — empty `DATABASE_URL` means JSONL on disk and an
 in-process store, empty `SUPABASE_URL` means the clinical routes refuse everyone with 503, which
 is a refusal and never an open door. `SUPABASE_PUBLISHABLE_KEY` is in neither list: it is read

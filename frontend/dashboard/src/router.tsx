@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 /**
- * Three screens and no router dependency.
+ * Four screens and no router dependency.
  *
  * The whole of it: read `location.pathname`, push to it, and re-render on
  * `popstate`. Deep links work because `vercel.json` sends every unmatched path
@@ -11,12 +11,14 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 export type Route =
   | { name: 'dashboard' }
   | { name: 'interview'; id: string }
-  | { name: 'patients' };
+  | { name: 'patients' }
+  | { name: 'deployments' };
 
 function parse(pathname: string): Route {
   const match = /^\/interviews\/(.+)$/.exec(pathname);
   if (match?.[1]) return { name: 'interview', id: decodeURIComponent(match[1]) };
   if (pathname === '/patients') return { name: 'patients' };
+  if (pathname === '/deployments') return { name: 'deployments' };
   return { name: 'dashboard' };
 }
 

@@ -17,6 +17,7 @@ from services.agent.session_log import ErrorEvent
 from services.core import lifecycle
 from services.core.config import (
     ACCEPTING_SESSIONS,
+    ALLOW_DEMO_SESSIONS,
     FLY_MACHINE_ID,
     LIVEKIT_PUBLIC_URL,
     MAX_CONCURRENT_SESSIONS,
@@ -25,8 +26,9 @@ from services.core.config import (
     RATE_LIMIT_WINDOW_S,
 )
 from services.core.limits import DailyQuota, RateLimiter
-from services.core.queue import resolve_interview
+from services.core.queue import UnknownInvitation, resolve_interview
 from services.core.store import create_session, get_session, live_sessions
+from shared.contracts.models import SessionStart
 from shared.contracts.wire import SessionBootstrap
 
 #: Marks a turn that arrived over HTTP rather than through the microphone, so
@@ -37,6 +39,16 @@ TYPED_USER_ID = "patient-typed"
 #: apology for a fault: the box holds a small number of concurrent calls by
 #: construction, so this is the system working.
 BUSY_MESSAGE = "All lines are busy at the moment. Please try again in a few minutes."
+
+#: Said to someone whose link is spent. A sentence rather than a status code,
+#: because the person reading it is a patient who did nothing wrong — most often
+#: the same person opening the same link twice.
+SPENT_MESSAGE = "This link has expired or has already been used."
+
+#: Said when `ALLOW_DEMO_SESSIONS` is off and somebody arrives with no link. The
+#: demo is on by default, so this is a deployment that chose to be
+#: dispatch-only, and the sentence has to point at what would fix it.
+NO_LINK_MESSAGE = "This service is by invitation. Please use the link you were sent."
 
 _starts = RateLimiter(burst=RATE_LIMIT_BURST, window_s=RATE_LIMIT_WINDOW_S)
 _today = DailyQuota(limit=MAX_SESSIONS_PER_DAY)
@@ -49,7 +61,7 @@ class TypedBody(BaseModel):
 
 
 @router.post("/session")
-async def start_session(request: Request):
+async def start_session(request: Request, body: SessionStart | None = None):
     """Start an interview. Four things, and the order is the point:
 
     1. create the session record and a room name
@@ -60,6 +72,11 @@ async def start_session(request: Request):
     The browser connects and finds the assistant already there. Steps 2 and 3
     are `lifecycle.start_call`, because their ordering is a property of the call
     rather than of this route.
+
+    The body is optional and every field on it defaults, so the body-less POST
+    the public demo has always made still means "start a demo call". What is new
+    is `invite`: the opaque token out of the patient portal's `?invite=`, which
+    names exactly one queued interview.
     """
     # Four refusals, cheapest first, and every one of them lands before a
     # session record, a room or a log file exists. They all say the same
@@ -92,7 +109,21 @@ async def start_session(request: Request):
         logger.warning(f"[session] refused {caller}: at capacity")
         raise HTTPException(503, BUSY_MESSAGE, headers={"Retry-After": "60"})
 
-    interview = await resolve_interview()
+    # Which call this is. A token names one queued interview and spends the link
+    # doing it; nothing names the demo, and whether that is still allowed is a
+    # secret rather than a redeploy.
+    invite = (body.invite or "").strip() if body else ""
+    if not invite and not ALLOW_DEMO_SESSIONS:
+        raise HTTPException(403, NO_LINK_MESSAGE)
+    try:
+        interview = await resolve_interview(invite or None)
+    except UnknownInvitation as exc:
+        # The one refusal that is about *this* caller's link rather than about
+        # capacity, so it says something different — and `frontend/call` renders
+        # the sentence in place of the Start button, because there is nothing
+        # here for them to retry.
+        raise HTTPException(404, SPENT_MESSAGE) from exc
+
     protocol = PROTOCOLS.get(interview.protocol_id)
     if protocol is None:
         raise HTTPException(500, f"unknown protocol {interview.protocol_id}")

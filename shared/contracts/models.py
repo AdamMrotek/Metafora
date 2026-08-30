@@ -358,6 +358,82 @@ class PatientSummary(CamelModel):
     created_at: datetime
 
 
+# ─── dispatch ────────────────────────────────────────────────────────────────
+#
+# What `POST /interviews`, `POST /interviews/{id}/invitation` and `GET
+# /protocols` carry, and the one optional body `POST /session` now accepts.
+# Phase 5a's whole surface: a clinician queues an interview, mints a link for
+# it, and a patient follows that link.
+
+#: How the link reaches the patient. `'link'` is the only one Phase 5a sends —
+#: the clinician copies the URL out of the dashboard — and `'email'` exists so
+#: that a `services/comms/` later is a sender rather than a redesign.
+InvitationChannel = Literal["link", "email"]
+
+
+class ProtocolOption(CamelModel):
+    """One entry of the composer's *what* field.
+
+    The id and the label only. A composer that had to fetch whole
+    `ProtocolVersion`s to fill a select would be pulling every question of every
+    protocol across to draw four words.
+    """
+
+    id: str
+    label: str
+
+
+class DispatchRequest(CamelModel):
+    """Queue one interview — the composer's *who · what · when*.
+
+    Exactly one of `patient_id` and `first_name`: an existing person off the
+    caller's list, or a new one. A new patient is a first name and nothing else,
+    because this product collects no demographics and `docs/system-map.md`
+    forbids inventing any — the identity a real deployment holds is carried
+    across at dispatch from a system that already has it.
+    """
+
+    #: Someone already on the caller's list. Must be within their scope, or the
+    #: request is a 404 for the same reason a read outside it is.
+    patient_id: str | None = None
+    #: A person nobody has called before. First name only, and it is what the
+    #: assistant says out loud in the first sentence of the call.
+    first_name: str | None = None
+    protocol_id: str
+    #: When the call is for. Null means "as soon as they follow the link" — the
+    #: row is queued either way, because nothing here dials anybody.
+    scheduled_for: datetime | None = None
+
+
+class Invitation(CamelModel):
+    """A link, as the dashboard copies it.
+
+    The URL is assembled by the backend, not the browser, for the same reason
+    `POST /session` hands down `LIVEKIT_PUBLIC_URL`: where the patient portal
+    lives is deployment configuration, and a bundle that baked it in would have
+    to be rebuilt to move it.
+    """
+
+    url: str
+    interview_id: str
+    channel: InvitationChannel
+    expires_at: datetime | None
+
+
+class SessionStart(CamelModel):
+    """The optional body of `POST /session`.
+
+    Every field defaults, so the body-less POST the public demo has always made
+    still means "start a demo call" and nothing about the patient portal's
+    existing request had to change.
+    """
+
+    #: The opaque token out of `?invite=`. Never an interview id: the id is on
+    #: the clinician's screen and in the dashboard's URLs, and a link that
+    #: carried it would let anyone who saw one guess the next.
+    invite: str | None = None
+
+
 # ─── patient experience ──────────────────────────────────────────────────────
 #
 # What `GET /experience` returns. No survey collects this — the rows are seeded

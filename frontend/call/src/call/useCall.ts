@@ -31,6 +31,16 @@ const MAX_DRAIN_MS = 12_000;
 /** What `mint_token(..., "assistant", ...)` in `services/core/app.py` names it. */
 const ASSISTANT_IDENTITY = 'assistant';
 
+/** A refusal from `POST /session`, carrying whether trying again could help. */
+class StartRefused extends Error {
+  constructor(
+    message: string,
+    readonly final: boolean,
+  ) {
+    super(message);
+  }
+}
+
 export interface Bubble {
   id: string;
   who: 'assistant' | 'patient';
@@ -45,6 +55,13 @@ export interface CallState {
   error: string | null;
   connecting: boolean;
   ended: boolean;
+  /**
+   * The call was refused for a reason no amount of trying again will fix —
+   * a spent link, or a deployment that is invitation-only. The distinction
+   * matters on the opening screen: everything else there is worth another tap,
+   * and this is a sentence with no button under it.
+   */
+  blocked: boolean;
 }
 
 /**
@@ -68,6 +85,7 @@ export function useCall() {
     error: null,
     connecting: false,
     ended: false,
+    blocked: false,
   });
 
   /**
@@ -131,7 +149,7 @@ export function useCall() {
   );
 
   const start = useCallback(async () => {
-    setState((s) => ({ ...s, connecting: true, error: null }));
+    setState((s) => ({ ...s, connecting: true, error: null, blocked: false }));
     try {
       // ── 1 · the microphone, before anything else ──
       // The assistant starts talking the moment a session exists, so asking
@@ -140,8 +158,24 @@ export function useCall() {
       const micTrack = await mic.open();
 
       // ── 2 · the session ──
-      const res = await fetch('/api/session', { method: 'POST' });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'could not start');
+      //
+      // The invitation, if there is one, is a query parameter rather than a
+      // path: `frontend/call/vercel.json` has no SPA rewrite, and a query needs
+      // none. Absent, the body is `{ invite: null }`, which is what the public
+      // demo has always meant — `SessionStart` defaults every field.
+      const invite = new URLSearchParams(window.location.search).get('invite');
+      const res = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invite }),
+      });
+      if (!res.ok) {
+        const message = (await res.json().catch(() => ({}))).error ?? 'could not start';
+        // 403 is "this deployment is invitation-only"; 404 with a link is a
+        // link already spent. Neither is retryable, and the opening screen says
+        // so instead of offering the button again.
+        throw new StartRefused(message, res.status === 403 || res.status === 404);
+      }
       const { token, url, session } = (await res.json()) as {
         token: string;
         url: string;
@@ -194,6 +228,7 @@ export function useCall() {
         ...s,
         connecting: false,
         error: err instanceof Error ? err.message : 'could not start the call',
+        blocked: err instanceof StartRefused && err.final,
       }));
     }
   }, [apply, hangUp, mic]);

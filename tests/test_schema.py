@@ -208,3 +208,91 @@ async def test_a_demo_patient_has_no_owner(db):
                             "where id = 'pt_demo'")
     assert row["origin"] == "demo"
     assert row["clinician_email"] is None
+
+
+# ─── clinical.invitations ────────────────────────────────────────────────────
+#
+# Phase 5a. Three constraints carry the whole of what a link is, and every one
+# of them is the kind a later migration drops without noticing: a token names
+# one interview, an interview has at most one live link, and the channel is a
+# closed set rather than whatever a caller passed.
+
+
+async def an_invitation(db, suffix: str = "1", **columns) -> None:
+    values = {
+        "id": f"inv_{suffix}",
+        "interview_id": "iv_0001",
+        "nonce": f"nonce-{suffix}",
+        "token_hash": f"hash-{suffix}",
+        **columns,
+    }
+    names = ", ".join(values)
+    placeholders = ", ".join(f"${i}" for i in range(1, len(values) + 1))
+    await db.execute(
+        f"insert into clinical.invitations ({names}) values ({placeholders})", *values.values()
+    )
+
+
+async def test_an_invitation_needs_an_interview(db):
+    """A link that names nothing is a link that resolves to somebody's guess."""
+    await seed(db)
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await an_invitation(db, interview_id="iv_missing")
+
+
+async def test_two_invitations_cannot_share_a_token(db):
+    """`token_hash` is unique, so one token names one interview. Without it a
+    hash collision inserted by hand would make a link ambiguous."""
+    await seed(db)
+    await an_invitation(db, "a")
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await an_invitation(db, "b", token_hash="hash-a")
+
+
+async def test_an_interview_has_at_most_one_live_invitation(db):
+    """`invitations_live`. This is what `invitations.mint` relies on to find
+    "the link already sent" — and what stops a rotation leaving two usable
+    links behind."""
+    await seed(db)
+    await an_invitation(db, "a")
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await an_invitation(db, "b")
+
+
+@pytest.mark.parametrize("spent", ["opened_at", "revoked_at"])
+async def test_a_spent_invitation_frees_the_live_slot(db, spent):
+    """Opened or revoked, the row stops being live — so the next mint may issue
+    a replacement rather than colliding with a link that no longer works."""
+    await seed(db)
+    await an_invitation(db, "a")
+    await db.execute(f"update clinical.invitations set {spent} = now() where id = 'inv_a'")
+
+    await an_invitation(db, "b")
+
+    # Scoped to this interview: the scratch database is shared across the
+    # postgres suite, and `tests/test_invitations.py` writes rows of its own.
+    assert await db.fetchval(
+        "select count(*) from clinical.invitations where interview_id = 'iv_0001'"
+    ) == 2
+
+
+async def test_an_invitation_channel_is_a_closed_set(db):
+    """`'link'` is all Phase 5a sends and `'email'` is here for a sender that
+    does not exist yet. Anything else is a typo reaching a patient."""
+    await seed(db)
+    with pytest.raises(asyncpg.CheckViolationError):
+        await an_invitation(db, channel="carrier-pigeon")
+
+
+async def test_an_invitation_can_be_spent(db):
+    """Deliberately *not* append-only, unlike `config.protocols` and
+    `transcript.events`: a record that cannot record that a link was used has no
+    way to refuse the second use."""
+    await seed(db)
+    await an_invitation(db)
+
+    await db.execute("update clinical.invitations set opened_at = now() where id = 'inv_1'")
+
+    assert await db.fetchval(
+        "select opened_at from clinical.invitations where id = 'inv_1'"
+    ) is not None

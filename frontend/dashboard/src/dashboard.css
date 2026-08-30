@@ -330,7 +330,7 @@
 .lg--neu i{background:var(--px-neu)}
 
 @media (prefers-reduced-motion:reduce){
-  .seg__b,.tip{transition:none}
+  .seg__b,.tip,.icon-btn,.copy__ok{transition:none}
 }
 
 @media (max-width:860px){
@@ -380,8 +380,6 @@ body { margin: 0; background: var(--sunken); }
 }
 .chrome nav a:hover { color: var(--fg-2); }
 .chrome nav a[aria-current='page'] { color: var(--fg); font-weight: 500 }
-.chrome nav a[aria-disabled='true'] { opacity: .45; cursor: default }
-.chrome nav a[aria-disabled='true']:hover { color: inherit }
 
 /* What the spec could not have: this deployment runs on synthetic data, and
    some of what is drawn is illustrative until Phase 5 fills it in. One chip,
@@ -432,6 +430,85 @@ textarea.fld__v, select.fld__v { font: inherit; font-size: var(--t-xs); width: 1
 .note b { display: block; color: var(--fg-2); font-weight: 500; margin-bottom: 4px }
 .note--bad { color: var(--danger-fg) }
 .note--bad b { color: var(--danger-fg) }
+
+/* ══ deployments ══════════════════════════════════════════════════════════
+   The compose panel, lifted from `docs/ux/clinical-dashboard.html` — the one
+   block of the spec's stylesheet that was left behind when the rest was moved,
+   because until Phase 5a no screen used it. It sits here rather than in the
+   moved region above so that "everything above the APP SHELL banner is the
+   spec, verbatim, in its own order" stays true of that region. */
+.dep { display: grid; grid-template-columns: repeat(4, 1fr) }
+.dep .fld { padding: var(--s-4) var(--s-5) var(--s-5); border-right: 1px solid var(--line-soft) }
+.dep .fld:last-child { border-right: 0 }
+
+/* The send row is deliberately quiet, because sending is the expected outcome,
+   so it gets no colour of its own beyond the one button. */
+.send {
+  padding: var(--s-4) var(--s-5); background: var(--sunken);
+  border-top: 1px solid var(--line-soft);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s-5); flex-wrap: wrap;
+}
+.send__t { font-size: var(--t-xs); color: var(--fg-3); line-height: 1.55; max-width: 58ch }
+.send__t b { color: var(--fg-2); font-weight: 600 }
+
+/* Four real controls where the spec drew four chips. `.fld__v` already carries
+   the box; these give the form elements inside it the same type. */
+.dep input.fld__v, .dep select.fld__v {
+  font: inherit; font-size: var(--t-xs); color: var(--fg); width: 100%;
+  appearance: none; cursor: pointer;
+}
+.dep input.fld__v { cursor: text }
+.dep input.fld__v:focus-visible, .dep select.fld__v:focus-visible { border-color: var(--accent) }
+.dep__new { margin-top: 6px }
+.dep__note {
+  display: block; margin-top: 5px;
+  font-size: var(--t-2xs); color: var(--fg-4); line-height: 1.5;
+}
+
+/* What was just queued, and the link for it. `.note` is the panel's one empty
+   /loading/refused shape, so this is that shape with an affordance in it
+   rather than a fifth kind of box. */
+.note--sent { color: var(--fg-3) }
+.note__act {
+  display: flex; align-items: center; justify-content: center; gap: var(--s-3);
+  margin-top: var(--s-4); font-size: var(--t-xs); color: var(--fg-4);
+}
+
+/* ── copy a link ──
+   An icon button, drawn like the spec's quiet controls rather than like the
+   one gradient button per screen: copying a link is not the decision, sending
+   it is. */
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
+  color: var(--fg-4); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r-xs);
+  cursor: pointer; transition: color .12s ease, border-color .12s ease;
+}
+.icon-btn:hover { color: var(--fg-2); border-color: var(--line-strong) }
+.icon-btn:focus-visible { border-color: var(--accent); outline: none }
+.copy { display: inline-flex; align-items: center; gap: var(--s-2); flex-wrap: wrap }
+.copy__ok {
+  font-size: var(--t-2xs); text-transform: uppercase; letter-spacing: .07em;
+  color: var(--accent); opacity: 0; transition: opacity .15s ease;
+}
+.copy__ok--on { opacity: 1 }
+/* The clipboard is unavailable — an insecure context, most often. The URL is
+   real either way, so it is offered to be selected rather than discarded. */
+.copy__manual {
+  font: inherit; font-family: var(--font-mono); font-size: var(--t-2xs);
+  color: var(--fg-3); background: var(--inset);
+  border: 1px solid var(--line); border-radius: var(--r-xs);
+  padding: 3px 6px; min-width: 16rem; flex: 1;
+}
+.copy__bad { font-size: var(--t-2xs); color: var(--danger-fg) }
+
+@media (max-width: 860px) {
+  .dep { grid-template-columns: 1fr 1fr }
+  .dep .fld:nth-child(2n) { border-right: 0 }
+  .dep .fld:nth-child(-n+2) { border-bottom: 1px solid var(--line-soft) }
+}
 
 /* ── sign in ──
    The one screen with no data behind it and no navigation off it. Centred,

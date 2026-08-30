@@ -98,6 +98,42 @@ JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else 
 #: open door.
 SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
 
+# ─── Dispatch ────────────────────────────────────────────────────────────────
+
+#: Where the *patient portal* lives, and therefore what an invitation link
+#: starts with. The backend assembles the whole URL and hands it down, exactly
+#: as it hands down `LIVEKIT_PUBLIC_URL`: which host serves the portal is
+#: deployment configuration, and a dashboard bundle that baked it in would need
+#: a rebuild to move it.
+#:
+#: The dev default is the Vite port, so `make dev` mints links that work. Outside
+#: dev that default is refused, because a deployment handing patients a
+#: `localhost` link is broken in a way nobody notices until one is sent.
+PORTAL_URL = os.environ.get("PORTAL_URL", "http://localhost:5173").rstrip("/")
+
+#: What invitation tokens are derived with. `clinical.invitations` stores the
+#: nonce in the clear and only `sha256(token)`, so a token is re-derivable —
+#: which is what lets a second click hand back the link already sent rather than
+#: quietly minting a second one and killing the first — and a leak of that table
+#: still yields no working link, because this string is not in it.
+#:
+#: Changing it invalidates every outstanding link. That is the correct behaviour
+#: for a secret and it is deliberate, not a side effect: `invitations.py`
+#: re-hashes before handing back a reused link, so a rotated secret mints a
+#: fresh one instead of returning a URL that no longer resolves.
+INVITE_SECRET = os.environ.get("INVITE_SECRET", "dev-invite-secret")
+
+#: Whether `POST /session` with no invitation still starts a call. On, because
+#: the public demo *is* the deployment (`docs/roadmap.md:317-321`). Off makes
+#: this a dispatch-only system: a patient without a link is told so in a
+#: sentence, and the demo roster stops being reachable from the front page.
+ALLOW_DEMO_SESSIONS = os.environ.get("ALLOW_DEMO_SESSIONS", "true").strip().lower() not in (
+    "false",
+    "0",
+    "no",
+)
+
+
 #: The frontend stops sharing an origin once it deploys separately, so its
 #: origin has to be named rather than implied by a Vite proxy.
 ALLOWED_ORIGINS = [
@@ -166,6 +202,9 @@ FLY_MACHINE_ID = os.environ.get("FLY_MACHINE_ID", "")
 #: What `livekit-server --dev` publishes, and therefore what everyone has.
 _DEV_LIVEKIT_CREDENTIALS = ("devkey", "secret")
 
+#: The invite secret this file defaults to, and therefore the one in the repo.
+_DEV_INVITE_SECRET = "dev-invite-secret"
+
 
 class ConfigError(RuntimeError):
     """Raised at import when a non-dev environment is misconfigured."""
@@ -193,6 +232,16 @@ def _problems() -> list[str]:
         found.append(
             "SUPABASE_URL is empty — every clinical read route would answer 503, "
             "so the dashboard would be locked out of a deployment that is otherwise up"
+        )
+    if INVITE_SECRET == _DEV_INVITE_SECRET:
+        found.append(
+            "INVITE_SECRET is still the published default — anyone reading this "
+            "repo could derive a working link for any interview id they guessed"
+        )
+    if PORTAL_URL.startswith("http://localhost"):
+        found.append(
+            f"PORTAL_URL is {PORTAL_URL!r} — every invitation would hand the "
+            "patient a link to a machine that is not theirs"
         )
     if LIVEKIT_PUBLIC_URL.startswith("ws://"):
         found.append(

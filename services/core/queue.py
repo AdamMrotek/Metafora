@@ -1,10 +1,10 @@
 """Dispatch: deciding whose interview this call is.
 
-Three arrivals, one function. A patient following an emailed link carries a
+Two arrivals, one function. A patient following a dispatched link carries a
 token; a visitor to the public demo carries nothing; and both end at the same
-`claim()`, which is the only transition that decides a call is happening. Phase
-5 fills in the token branch against `clinical.invitations` and changes nothing
-else here, because the claim is already written.
+`claim()`, which is the only transition that decides a call is happening. The
+token branch was filled in at Phase 5a against `clinical.invitations` and
+changed nothing else here, because the claim was already written.
 
 With a database the demo arrival attaches its interview to one of the ten
 seeded roster patients rather than creating an eleventh person; without one the
@@ -15,7 +15,7 @@ nothing provisioned behaves as it always did.
 import os
 import uuid
 
-from services.core import db
+from services.core import db, invitations
 from shared.contracts.models import Patient, QueuedInterview
 
 #: What the demo dispatches. The warm-up by default because it is one question
@@ -111,12 +111,53 @@ async def resolve_interview(token: str | None = None) -> QueuedInterview:
     return interview
 
 
+#: The interview a spent token named, in the shape the call needs. Read after
+#: the invitation is claimed rather than joined into that statement, because the
+#: statement that spends a link has to stay one conditional UPDATE.
+_BY_ID = """
+    select i.id, i.protocol_id, p.id as patient_id, p.first_name
+    from clinical.interviews i
+    join clinical.patients p on p.id = i.patient_id
+    where i.id = $1
+"""
+
+
 async def _by_invitation(token: str) -> QueuedInterview:
-    """Phase 5. The token is hashed and looked up in `clinical.invitations`,
-    which binds it to exactly one interview; the row is then claimed by the same
-    `claim()` the demo path uses, which is why that function is written now.
+    """The interview one link names, spent and claimed.
+
+    Three refusals, all of them the same sentence to the caller. The token is
+    not ours (or is revoked, expired or already opened): `invitations.spend`
+    answers None. The interview vanished under it: no row. It is no longer
+    queued: `claim` says no, which is a link whose call has already started —
+    the second tab opened from an email, or the same person coming back.
+
+    The order matters. Spending happens first and in one statement, so two
+    arrivals cannot both be the first; the claim then decides which of them
+    actually starts a call. A link is therefore spent even when the claim
+    fails, which is right: the link was for one call, and that call has begun.
     """
-    raise UnknownInvitation("interview links are not issued yet")
+    if not db.enabled():
+        # No database means no invitations table, so no token can be ours. The
+        # demo path still works — that is what `make dev` on a bare laptop is.
+        raise UnknownInvitation("this deployment issues no interview links")
+
+    pool = db.pool()
+    interview_id = await invitations.spend(pool, token)
+    if interview_id is None:
+        raise UnknownInvitation("this link has expired or has already been used")
+
+    row = await pool.fetchrow(_BY_ID, interview_id)
+    if row is None:
+        raise UnknownInvitation("this link has expired or has already been used")
+
+    if not await claim(interview_id):
+        raise UnknownInvitation("this link has expired or has already been used")
+
+    return QueuedInterview(
+        id=row["id"],
+        protocol_id=row["protocol_id"],
+        patient=Patient(id=row["patient_id"], first_name=row["first_name"]),
+    )
 
 
 async def claim(interview_id: str) -> bool:

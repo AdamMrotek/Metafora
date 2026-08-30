@@ -28,10 +28,24 @@ from shared.auth.verify import InvalidToken
 ISSUER = "https://project.supabase.co/auth/v1"
 CLINICIAN = "clinician@example.test"
 
-#: Every route that reads the record. Parametrised rather than tested one at a
-#: time: "which routes are behind the door" is the property, and a route added
-#: to this list is a route the whole file is asserted against.
-GUARDED = ["/interviews", "/interviews/iv_anything", "/patients", "/experience", "/me"]
+#: Every route behind the door, as `(method, path)`. Parametrised rather than
+#: tested one at a time: "which routes are behind the door" is the property, and
+#: a route added to this list is a route the whole file is asserted against.
+#:
+#: The method is carried because Phase 5a's dispatch put two POSTs in the
+#: clinical routers, and a list of paths could not tell them from the reads —
+#: which would have left the two routes that *write* the record as the only ones
+#: this file did not hold.
+GUARDED = [
+    ("GET", "/interviews"),
+    ("GET", "/interviews/iv_anything"),
+    ("GET", "/patients"),
+    ("GET", "/experience"),
+    ("GET", "/protocols"),
+    ("GET", "/me"),
+    ("POST", "/interviews"),
+    ("POST", "/interviews/iv_anything/invitation"),
+]
 
 
 # ─── a signing key, and a key set served from memory ─────────────────────────
@@ -144,19 +158,30 @@ def client() -> httpx.AsyncClient:
 
 
 async def get(path: str, bearer: str | None = None) -> httpx.Response:
+    return await call("GET", path, bearer)
+
+
+async def call(method: str, path: str, bearer: str | None = None) -> httpx.Response:
+    """Any verb, so the parametrised route tests cover the writes too.
+
+    The POST bodies are deliberately empty. Every one of these tests asserts a
+    refusal that happens at the door, before FastAPI has any reason to look at a
+    body — and one that reached validation instead would be a test passing for
+    the wrong reason.
+    """
     headers = {"Authorization": f"Bearer {bearer}"} if bearer else {}
     async with client() as http:
-        return await http.get(path, headers=headers)
+        return await http.request(method, path, headers=headers, json={})
 
 
 # ─── who is refused ──────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("path", GUARDED)
-async def test_an_anonymous_caller_is_refused(door, path):
+@pytest.mark.parametrize(("method", "path"), GUARDED)
+async def test_an_anonymous_caller_is_refused(door, method, path):
     """The roadmap's own acceptance line: every clinical route refuses a caller
     who brought nothing."""
-    response = await get(path)
+    response = await call(method, path)
 
     assert response.status_code == 401
     # The portal's body shape, which the clinical routes inherit.
@@ -250,13 +275,13 @@ async def test_garbage_is_refused_rather_than_raised(door):
 # ─── verified, and still not allowed in ──────────────────────────────────────
 
 
-@pytest.mark.parametrize("path", GUARDED)
-async def test_a_verified_stranger_is_told_why(door, signing_key, path):
+@pytest.mark.parametrize(("method", "path"), GUARDED)
+async def test_a_verified_stranger_is_told_why(door, signing_key, method, path):
     """Anyone may sign up to a Supabase project, so verifying a token is not the
     same as having a caseload. This is the difference, and it is a 403 with a
     reason because the caller *did* prove who they are — telling them their
     address is not on the list is safe, and it is the only useful next step."""
-    response = await get(path, token(signing_key, email="stranger@example.test"))
+    response = await call(method, path, token(signing_key, email="stranger@example.test"))
 
     assert response.status_code == 403
     assert "stranger@example.test" in response.json()["error"]
@@ -353,14 +378,14 @@ async def test_the_patient_route_never_asks_for_a_credential(door):
 # ─── a server that cannot verify anything ────────────────────────────────────
 
 
-@pytest.mark.parametrize("path", GUARDED)
-async def test_an_unconfigured_server_refuses_rather_than_admits(path, signing_key):
+@pytest.mark.parametrize(("method", "path"), GUARDED)
+async def test_an_unconfigured_server_refuses_rather_than_admits(method, path, signing_key):
     """No `SUPABASE_URL` — `make dev` on a laptop. The refusal is the point: the
     one thing this must never be is an open door, and a 503 is also honest,
     because nothing here can verify anything."""
     auth.configure(None)
 
-    response = await get(path, token(signing_key))
+    response = await call(method, path, token(signing_key))
 
     assert response.status_code == 503
     assert response.json()["error"] == auth.UNCONFIGURED

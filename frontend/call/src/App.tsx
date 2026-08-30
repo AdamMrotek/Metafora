@@ -29,7 +29,12 @@ export function App() {
       />
 
       {!started ? (
-        <Opening onStart={call.start} connecting={call.connecting} error={call.error} />
+        <Opening
+          onStart={call.start}
+          connecting={call.connecting}
+          error={call.error}
+          blocked={call.blocked}
+        />
       ) : (
         <div className="pp__body">
           <div className="pp__conv">
@@ -64,16 +69,36 @@ function Header(props: { clinician: string; initials: string; practice: string; 
   );
 }
 
-/** The only tap in the whole interview, and the only filled button on screen. */
+/**
+ * The only tap in the whole interview, and the only filled button on screen.
+ *
+ * Unless there is nothing to tap. A link that has been used, or a deployment
+ * that is invitation-only, is a refusal no amount of trying again resolves —
+ * so the sentence the server wrote stands where the button would be, rather
+ * than under a button that will fail identically.
+ */
 function Opening({
   onStart,
   connecting,
   error,
+  blocked,
 }: {
   onStart: () => void;
   connecting: boolean;
   error: string | null;
+  blocked: boolean;
 }) {
+  if (blocked) {
+    return (
+      <div className="pp__start">
+        <p>{error}</p>
+        <p className="pp__demo">
+          If you were expecting to take a call, ask whoever sent you the link for a new one.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="pp__start">
       <p>

@@ -5,6 +5,7 @@ import { RecordProvider, useRecord } from './data.tsx';
 import { elapsed } from './format.ts';
 import { Link, useRoute } from './router.tsx';
 import { Dashboard } from './screens/Dashboard.tsx';
+import { Deployments } from './screens/Deployments.tsx';
 import { Interview } from './screens/Interview.tsx';
 import { Patients } from './screens/Patients.tsx';
 import { flagged } from './transcript.ts';
@@ -12,7 +13,7 @@ import { flagged } from './transcript.ts';
 /**
  * The clinician portal.
  *
- * Three screens onto one record, and a band that follows you across all of
+ * Four screens onto one record, and a band that follows you across all of
  * them. The order the dashboard asks its questions in is the layout, and the
  * band is above all of it because "is anything on fire?" outranks every other
  * question on the screen.
@@ -33,6 +34,7 @@ function Screen() {
   const route = useRoute();
   if (route.name === 'interview') return <Interview id={route.id} />;
   if (route.name === 'patients') return <Patients />;
+  if (route.name === 'deployments') return <Deployments />;
   return <Dashboard />;
 }
 
@@ -52,12 +54,9 @@ function Chrome({ account, onSignOut }: { account: Account; onSignOut: () => voi
         <Link to="/patients" {...on('patients')}>
           Patients
         </Link>
-        {/* Dispatch is Phase 5. Drawn because the spec's chrome has three
-            words in it, inert because a nav item that goes nowhere is better
-            than one that goes somewhere unfinished. */}
-        <a aria-disabled="true" title="Dispatch arrives in Phase 5">
+        <Link to="/deployments" {...on('deployments')}>
           Deployments
-        </a>
+        </Link>
       </nav>
       <span className="grow" />
       <span

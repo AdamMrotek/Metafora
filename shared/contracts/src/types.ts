@@ -253,6 +253,69 @@ export interface PatientSummary {
   createdAt: string;
 }
 
+/**
+ * One entry of the composer's *what* field.
+ *
+ * The id and the label only. A composer that had to fetch whole
+ * `ProtocolVersion`s to fill a select would be pulling every question of every
+ * protocol across to draw four words.
+ */
+export interface ProtocolOption {
+  id: string;
+  label: string;
+}
+
+/**
+ * Queue one interview — the composer's *who · what · when*.
+ *
+ * Exactly one of `patient_id` and `first_name`: an existing person off the
+ * caller's list, or a new one. A new patient is a first name and nothing else,
+ * because this product collects no demographics and `docs/system-map.md`
+ * forbids inventing any — the identity a real deployment holds is carried
+ * across at dispatch from a system that already has it.
+ */
+export interface DispatchRequest {
+  /** Someone already on the caller's list. Must be within their scope, or the */
+  /** request is a 404 for the same reason a read outside it is. */
+  patientId?: string;
+  /** A person nobody has called before. First name only, and it is what the */
+  /** assistant says out loud in the first sentence of the call. */
+  firstName?: string;
+  protocolId: string;
+  /** When the call is for. Null means "as soon as they follow the link" — the */
+  /** row is queued either way, because nothing here dials anybody. */
+  scheduledFor?: string;
+}
+
+/**
+ * A link, as the dashboard copies it.
+ *
+ * The URL is assembled by the backend, not the browser, for the same reason
+ * `POST /session` hands down `LIVEKIT_PUBLIC_URL`: where the patient portal
+ * lives is deployment configuration, and a bundle that baked it in would have
+ * to be rebuilt to move it.
+ */
+export interface Invitation {
+  url: string;
+  interviewId: string;
+  channel: InvitationChannel;
+  expiresAt: string | null;
+}
+
+/**
+ * The optional body of `POST /session`.
+ *
+ * Every field defaults, so the body-less POST the public demo has always made
+ * still means "start a demo call" and nothing about the patient portal's
+ * existing request had to change.
+ */
+export interface SessionStart {
+  /** The opaque token out of `?invite=`. Never an interview id: the id is on */
+  /** the clinician's screen and in the dashboard's URLs, and a link that */
+  /** carried it would let anyone who saw one guess the next. */
+  invite?: string;
+}
+
 /** One bar of the chart. */
 export interface ExperienceDay {
   /** Already formatted for the axis, because the window is chosen server-side */
@@ -294,5 +357,7 @@ export type CallPhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'ended'
 export type InterviewStatus = 'queued' | 'running' | 'completed' | 'abandoned';
 
 export type PatientOrigin = 'demo' | 'dispatched';
+
+export type InvitationChannel = 'link' | 'email';
 
 export type ExperienceRange = 'today' | 'week' | 'all';

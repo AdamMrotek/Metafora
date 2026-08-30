@@ -14,6 +14,9 @@ independently shippable, in the order the MVP line needs them (deploy → intake
 sign). 5·0 is the odd one out and is **shipped**: it depends on none of the others and was the
 cheapest way to shrink `demo.ts`, which every later stage otherwise keeps inheriting.
 
+**5·0 and 5a are both shipped.** `clinical.patients.clinician_email` is now written, so the scope
+predicate in `reads.py` discriminates for the first time and 5b and 5c can be built on it.
+
 **5a deliberately drops the email channel.** The roadmap's dispatch sends an emailed link 24h
 before `scheduled_for`; an email provider is still unchosen and would be a fourth egress
 (`docs/roadmap-review.md:175-179`). Instead the clinician copies the link from the dashboard and
@@ -99,7 +102,37 @@ The `demo data` chip now names those three rather than gesturing at the screen.
 
 ---
 
-# 5a · Dispatch (no email)
+# 5a · Dispatch (no email) — **shipped**
+
+**Done:** a clinician creates an interview from the Deployments screen, copies its link, opens it
+in the patient portal, and that call runs against *that* interview — with the row's owner set.
+
+Everything below was built as specified. Five departures from the plan, all recorded rather than
+quietly taken:
+
+1. **Ownership is not claimed on an existing patient.** Only a newly created one gets
+   `clinician_email`. Dispatching a call to one of the shared demo roster would otherwise take that
+   person off every other clinician's dashboard, and being sent a call by somebody does not make a
+   person theirs retrospectively. `tests/test_dispatch.py::test_dispatching_to_a_demo_patient_does_not_claim_them`.
+2. **`invitations.resolve` is `invitations.spend`,** and it is one conditional `UPDATE … RETURNING`
+   rather than a select then a stamp. Two tabs opened from one link cannot both find it unspent;
+   the plan's shape could.
+3. **`GET /protocols` was added,** the roadmap's own first option. Deriving the composer's *what*
+   field from the ids on existing summaries would leave it empty on a fresh database, which is
+   exactly when it is needed.
+4. **`reads.summary(user, id)` was split out of `reads.interview`,** so `dispatch.py` answers with
+   the row the review table draws rather than assembling a second one.
+5. **`.dep` / `.send` were lifted from the spec's stylesheet** into the region *below* the APP SHELL
+   banner. They are the spec's own rules verbatim — the one block left behind when the rest was
+   moved, because no screen used it — but they sit below the banner so that "everything above is the
+   spec, in its own order" stays true of that region.
+
+Two things the plan named that are not there: `sent_at` is written by nothing, because handing a URL
+to a clinician is not the same event as it reaching a patient and the column should not claim it is;
+and `GUARDED` in `tests/test_auth.py` became `(method, path)` pairs, because a list of paths could
+not hold the two routes that *write*.
+
+**Original plan, as built:**
 
 **Done when:** a clinician creates an interview from the dashboard, copies its link, opens it in
 the patient portal, and that call runs against *that* interview — with the row's owner set, so
@@ -345,9 +378,9 @@ review it, sign it, then re-read `GET /interviews/{id}/ledger` and confirm the h
 
 ## Order of work
 
-5·0 is shipped and depended on nothing. Build 5a completely and verify it end to end before
-starting 5b — 5a is the only stage that makes `clinician_email` non-null, and both later stages
-scope on it.
+5·0 and 5a are both shipped. 5a was the only stage that makes `clinician_email` non-null, and both
+remaining stages scope on it — so 5b and 5c can now be built in either order, subject to the
+ordering caveat recorded under 5c.
 
 5a inherits one simplification from 5·0: the Deployments composer's patient select can show an NHS
 number, because the patients it lists have one.

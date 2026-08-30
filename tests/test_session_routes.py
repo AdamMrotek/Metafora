@@ -11,12 +11,19 @@ with no SFU, no Groq key and no network. What is being held:
   bill, and that each of them leaves nothing behind
 * typed answers, which must arrive the way spoken ones do
 * the failure body shape the portal reads
+* the optional body Phase 5a added, and that adding it left the body-less POST
+  the public demo has always made meaning exactly what it meant before
 """
 
 from services.core import lifecycle, store
 from services.core.limits import DailyQuota, RateLimiter
 from services.core.routes import session as session_routes
-from services.core.routes.session import BUSY_MESSAGE, TYPED_USER_ID
+from services.core.routes.session import (
+    BUSY_MESSAGE,
+    NO_LINK_MESSAGE,
+    SPENT_MESSAGE,
+    TYPED_USER_ID,
+)
 from tests.asgi import client, start
 
 # ─── health ──────────────────────────────────────────────────────────────────
@@ -189,3 +196,72 @@ async def test_failures_speak_the_body_shape_the_portal_reads(bots):
 
     assert "error" in body
     assert "detail" not in body
+
+
+# ─── the invitation ──────────────────────────────────────────────────────────
+#
+# The database half — a link that resolves, and the refusals that need a real
+# `clinical.invitations` — is `tests/test_invitations.py`. What is held here is
+# the route: that a body arriving changes nothing for the caller who sends none,
+# and that a refusal about *this* caller's link says something different from
+# the four that are about capacity.
+
+
+async def test_a_body_less_start_still_means_a_demo_call(bots):
+    """`SessionStart` defaults every field, so the POST `frontend/call` made
+    before Phase 5a — and `tests/asgi.py`'s `start()` — means what it always
+    meant. This is the compatibility assertion the optional body exists for."""
+    async with client() as http:
+        response = await start(http)
+
+    assert response.status_code == 200
+    assert response.json()["session"]["patientFirstName"]
+
+
+async def test_an_explicitly_null_invite_is_a_demo_call_too(bots):
+    """What the portal actually sends when there is no `?invite=` in the URL."""
+    async with client() as http:
+        response = await http.post("/session", json={"invite": None})
+
+    assert response.status_code == 200
+
+
+async def test_a_token_we_do_not_honour_is_refused_with_its_own_sentence(bots):
+    """Not `BUSY_MESSAGE`. The four capacity refusals share one sentence on
+    purpose — a caller learns nothing about which limit they hit — but this one
+    is about the link in their hand, and there is nothing for them to retry."""
+    async with client() as http:
+        refused = await http.post("/session", json={"invite": "not-a-token-we-issued"})
+
+    assert refused.status_code == 404
+    assert refused.json()["error"] == SPENT_MESSAGE
+    # Refused before a session record, a room or a log file exists, like every
+    # other refusal on this route.
+    assert store.live_sessions() == []
+
+
+async def test_a_dispatch_only_deployment_says_so_to_a_caller_with_no_link(bots, monkeypatch):
+    """`ALLOW_DEMO_SESSIONS` off. The sentence has to point at what would fix
+    it, because the person reading it did nothing wrong — they arrived at a
+    front page that is not the way in on this deployment."""
+    monkeypatch.setattr(session_routes, "ALLOW_DEMO_SESSIONS", False)
+
+    async with client() as http:
+        refused = await start(http)
+
+    assert refused.status_code == 403
+    assert refused.json()["error"] == NO_LINK_MESSAGE
+    assert store.live_sessions() == []
+
+
+async def test_a_blank_invite_is_not_a_link(bots, monkeypatch):
+    """An empty string is a query parameter that was present and empty, which is
+    the same as absent — and must not be offered to `resolve_interview` as a
+    token nobody issued."""
+    monkeypatch.setattr(session_routes, "ALLOW_DEMO_SESSIONS", False)
+
+    async with client() as http:
+        refused = await http.post("/session", json={"invite": "   "})
+
+    # The tokenless refusal, not the spent-link one.
+    assert refused.json()["error"] == NO_LINK_MESSAGE

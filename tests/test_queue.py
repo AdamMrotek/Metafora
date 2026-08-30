@@ -40,8 +40,11 @@ def test_the_mint_is_usable_without_awaiting_anything():
     assert synthetic_interview().patient.first_name
 
 
-async def test_a_link_is_refused_until_links_are_issued():
-    """Phase 5 fills this in. Until then a token is a thing we do not honour,
-    and saying so is better than quietly running someone else's interview."""
+async def test_a_token_is_refused_where_no_link_was_ever_issued():
+    """With no database there is no `clinical.invitations`, so no token can be
+    ours — and the refusal is what matters, because the alternative to refusing
+    an unrecognised token is quietly running somebody else's interview.
+
+    The honoured path needs a real table and is `tests/test_invitations.py`."""
     with pytest.raises(UnknownInvitation):
         await resolve_interview("some-token")
