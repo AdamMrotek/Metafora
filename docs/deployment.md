@@ -75,12 +75,13 @@ sentence is the whole of §6's argument, so it is worth recording that it is now
 than a plan.
 
 **The clinician portal went up on 2026-08-28**, at
-**https://dashboard-jet-xi-s5bpftmjnx.vercel.app**. The three things happened in the order this
+**https://metafora-dashboard.vercel.app**. The three things happened in the order this
 paragraph used to prescribe: `fly secrets set SUPABASE_PUBLISHABLE_KEY` first (before the deploy
 that adds `/config`, or the route answers 503 to a dashboard that is otherwise fine), then the
 second Vercel project, then a sign-in from the Vercel URL rather than through the Vite proxy —
-the first time the rewrite, and not the proxy, is what carries `/api`. The project is named
-**`dashboard`**; `metafora-dashboard` was the name planned here and never the one created.
+the first time the rewrite, and not the proxy, is what carries `/api`. The project was created as
+`metafora-call` rather than beside nothing. A rename does not regenerate the auto-assigned
+`.vercel.app`, so `metafora-dashboard.vercel.app` had to be added as a project domain by hand;
 
 What that last step proves and a laptop could not: a deep link answers 200 through the SPA
 fallback, `/api/config` names the project through the rewrite, and `/api/interviews` is 401
