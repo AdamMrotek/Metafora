@@ -171,13 +171,6 @@ export function statusPill(row: InterviewSummary): { label: string; kind: PillKi
   return { label: 'issue raised', kind: 'warn' };
 }
 
-/** Newest activity first — when the call happened, not when it was queued, so
- *  a backlog dispatched last week does not bury this morning's interview. It is
- *  the order `reads.interviews` already returns; repeated here because the
- *  screens re-sort and filter client-side. */
-export const activityAt = (row: InterviewSummary): string =>
-  row.endedAt ?? row.startedAt ?? row.scheduledFor ?? row.createdAt;
-
 /* ── patient identity ──────────────────────────────────────────────────────
    Real values, formatted. An NHS number is seeded, from the range NHS England
    reserves for test data, and held under a CHECK in `clinical.patients` that

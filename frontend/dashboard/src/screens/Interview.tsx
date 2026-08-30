@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { InterviewDetail, ResultField } from '@metafora/contracts';
+import type { InterviewDetail, InterviewSummary, ResultField } from '@metafora/contracts';
 import { get } from '../api.ts';
-import { historyOf, useRecord } from '../data.tsx';
 import * as demo from '../demo.ts';
 import { dob, gap, nhsMasked, outcome, stamp, statusPill } from '../format.ts';
 import { Link } from '../router.tsx';
@@ -18,7 +17,6 @@ import { lines } from '../transcript.ts';
  * cannot store is worse than one that plainly does not yet.
  */
 export function Interview({ id }: { id: string }) {
-  const { interviews } = useRecord();
   const [detail, setDetail] = useState<InterviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +50,11 @@ export function Interview({ id }: { id: string }) {
   const row = detail.interview;
   const said = outcome(row);
   const pill = statusPill(row);
-  const history = historyOf(interviews, row.patientId);
+  // Fetched with the interview rather than filtered out of the dashboard's
+  // list, so opening this screen from a bookmark draws the same timeline as
+  // reaching it from the table — and so it does not quietly become a timeline
+  // of whichever page the table happened to be showing.
+  const history = detail.history;
   const born = dob(row.patientDateOfBirth);
 
   return (
@@ -113,7 +115,7 @@ function Timeline({
   history,
   currentId,
 }: {
-  history: ReturnType<typeof historyOf>;
+  history: InterviewSummary[];
   currentId: string;
 }) {
   if (history.length < 2) return null;

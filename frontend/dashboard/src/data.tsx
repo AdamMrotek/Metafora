@@ -1,23 +1,42 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { InterviewSummary, PatientSummary } from '@metafora/contracts';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import type { InterviewPage, Overview, PatientSummary } from '@metafora/contracts';
 import { get } from './api.ts';
-import { activityAt } from './format.ts';
 
 /**
- * The two list reads, fetched once and shared.
+ * What the whole screen shares, and what one table asks for itself.
  *
- * Four things want the interview list — the escalation rail, the review table,
- * the scheduled-calls card and the detail screen's history timeline — and they
- * are on screen at the same time. Fetching per component would be four requests
- * for one answer, and four chances for the rail to disagree with the table.
+ * These used to be one thing: a single `GET /interviews` returning the hundred
+ * most recent rows, which five components then filtered, counted and paged in
+ * the browser. That was workable while a hundred rows *was* the record. It
+ * stopped being workable the moment the table paged properly, because a tile
+ * counting the eight rows on screen is a tile counting a page and calling it a
+ * caseload — and it was already wrong before that, at a hundred and one
+ * interviews, silently.
  *
- * Reads only, as `reads.py` is reads only, so there is no cache to invalidate:
- * `reload` exists for the one case that matters, which is a call ending while
- * the dashboard is open.
+ * So the split is by what a number is *about*:
+ *
+ * - `overview` — the three tiles, the escalation band, what is still out, and
+ *   the protocol filter's options. All about the whole caseload, none of them
+ *   changing when someone sorts a table or types in its search box, so they are
+ *   fetched once and shared.
+ * - `patients` — the same, for the patients screen, which now carries what its
+ *   rows draw rather than deriving it from an interview list.
+ * - the review table's page — `useInterviews` below, which is not shared,
+ *   because it is the one thing that *does* change on every keystroke.
+ *
+ * `reload` exists for the case that matters: a call ending, or one being
+ * queued, while the dashboard is open.
  */
 
 type Record = {
-  interviews: InterviewSummary[];
+  overview: Overview | null;
   patients: PatientSummary[];
   loading: boolean;
   error: string | null;
@@ -26,8 +45,19 @@ type Record = {
 
 const RecordContext = createContext<Record | null>(null);
 
+/** An overview before one has arrived, so components can render their frame
+ *  without a null check on every field. Zeroes, never placeholders. */
+export const EMPTY_OVERVIEW: Overview = {
+  urgent: 0,
+  flagged: 0,
+  incomplete: 0,
+  escalations: [],
+  queued: [],
+  protocols: [],
+};
+
 export function RecordProvider({ children }: { children: ReactNode }) {
-  const [interviews, setInterviews] = useState<InterviewSummary[]>([]);
+  const [overview, setOverview] = useState<Overview | null>(null);
   const [patients, setPatients] = useState<PatientSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,10 +66,10 @@ export function RecordProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let live = true;
     setLoading(true);
-    Promise.all([get<InterviewSummary[]>('/interviews'), get<PatientSummary[]>('/patients')])
-      .then(([iv, pt]) => {
+    Promise.all([get<Overview>('/overview'), get<PatientSummary[]>('/patients')])
+      .then(([ov, pt]) => {
         if (!live) return;
-        setInterviews(iv);
+        setOverview(ov);
         setPatients(pt);
         setError(null);
       })
@@ -52,7 +82,7 @@ export function RecordProvider({ children }: { children: ReactNode }) {
 
   return (
     <RecordContext.Provider
-      value={{ interviews, patients, loading, error, reload: () => setNonce((n) => n + 1) }}
+      value={{ overview, patients, loading, error, reload: () => setNonce((n) => n + 1) }}
     >
       {children}
     </RecordContext.Provider>
@@ -65,16 +95,69 @@ export function useRecord(): Record {
   return value;
 }
 
-/** Every interview for one patient, oldest first — the detail screen's
- *  timeline, and the patients table's "last interview" column. */
-export function historyOf(interviews: InterviewSummary[], patientId: string): InterviewSummary[] {
-  return interviews
-    .filter((i) => i.patientId === patientId)
-    .sort((a, b) => activityAt(a).localeCompare(activityAt(b)));
+export type TableQuery = {
+  sort: 'urgency' | 'recent';
+  search: string;
+  protocol: string;
+  page: number;
+  limit: number;
+};
+
+/**
+ * One page of the review table.
+ *
+ * Every field of `TableQuery` becomes a query parameter, because every one of
+ * them is now a decision the database makes over the whole record rather than a
+ * decision the browser makes about rows it was already given.
+ *
+ * The search is debounced. Sorting and paging are one deliberate click each and
+ * go straight out; typing is not, and a request per keystroke would be a query
+ * per character of a patient's name.
+ */
+export function useInterviews(query: TableQuery) {
+  const [page, setPage] = useState<InterviewPage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
+
+  const search = useDebounced(query.search, 250);
+
+  const path = useMemo(() => {
+    const params = new URLSearchParams({
+      sort: query.sort,
+      page: String(query.page),
+      limit: String(query.limit),
+    });
+    if (search.trim()) params.set('q', search.trim());
+    if (query.protocol !== 'all') params.set('protocol', query.protocol);
+    return `/interviews?${params}`;
+  }, [query.sort, query.page, query.limit, query.protocol, search]);
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    get<InterviewPage>(path)
+      .then((value) => {
+        if (!live) return;
+        setPage(value);
+        setError(null);
+      })
+      .catch((e: Error) => live && setError(e.message))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [path, nonce]);
+
+  return { page, loading, error, reload: () => setNonce((n) => n + 1) };
 }
 
-/** Still owed a decision: an escalation nobody has cleared, or a call that did
- *  not finish. Phase 5's signature ledger is what will make this exact; until
- *  then it is the same predicate the review table's warn pills use. */
-export const isOpen = (row: InterviewSummary): boolean =>
-  row.outcome === 'safety' || row.status === 'abandoned';
+/** Hold a value still until it has stopped changing for `ms`. */
+function useDebounced<T>(value: T, ms: number): T {
+  const [held, setHeld] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setHeld(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return held;
+}

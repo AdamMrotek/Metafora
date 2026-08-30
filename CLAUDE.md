@@ -25,7 +25,8 @@ neither frontend bakes one in — and the routes live in `routes/`, split by aud
 patient's and holds no credential, `interviews.py` + `patients.py` + `me.py` are the clinician's
 and every route is behind `require_role`. `lifecycle.py` is the call itself (join, speak, teardown, drain), shared by the
 session router and `lifespan`. `store.py` live session handles here, the durable record in
-Postgres · `reads.py` the dashboard's SQL, every function taking a `CurrentUser` · `db.py` the only
+Postgres · `reads.py` the dashboard's SQL — every function takes a `CurrentUser`, and the
+review table is **ordered, searched, filtered and paged here**, never in the browser · `db.py` the only
 pool · `tokens.py` LiveKit tokens · `config.py` env · `queue.py` arrival (`resolve_interview`:
 a token, or the demo) · `dispatch.py` queueing a call for a named person, the only writer of
 `clinical.patients.clinician_email` · `invitations.py` the link, whose token is *derived* from
@@ -64,9 +65,11 @@ runs them against a throwaway Postgres.
 
 **`frontend/dashboard/src/`** — clinician portal, the read path (`:5174`). `main.tsx` boots in one
 order that cannot be reshuffled: `/config` → Supabase client → `GET /me` → the app. `api.ts` is
-every request (`get`, and `post` for dispatch), `data.tsx` fetches the two lists once and shares
-them, `router.tsx` is forty lines over `pushState`, `screens/` is the four screens, `CopyLink.tsx`
-mints and copies a patient's link. **`demo.ts` is every value on the screen that
+every request (`get`, and `post` for dispatch), `data.tsx` splits the reads by what a number is
+*about* — `/overview` and `/patients` are fetched once and shared because they describe the whole
+caseload, while `useInterviews` fetches one page of the review table and is not shared because it
+changes on every keystroke — `router.tsx` is forty lines over `pushState`, `screens/` is the four
+screens, `CopyLink.tsx` mints and copies a patient's link. **`demo.ts` is every value on the screen that
 no query produced** — now only the referral reason, the consent chip and the ledger hashes,
 deterministic from a real id, and the last file Phase 5 has to delete; NHS numbers, DOB and the
 experience chart became seeded rows in Phase 5·0 and are formatted by `format.ts` like any other
@@ -79,8 +82,8 @@ another to the clinical shell.
 
 **`tests/`** — mirrors module names (`test_gate.py`, `test_machine.py`, …). `test_auth.py` is in
 plain `make test`: it generates an EC keypair and serves the JWKS from memory, so the real ES256
-path runs with no network and no project. `test_reads.py`, `test_persistence.py`, `test_dispatch.py` and
-`test_invitations.py` are behind the `postgres` marker. `tests/e2e/patient.py` needs a live backend and a real key; it is not part of
+path runs with no network and no project. `test_reads.py`, `test_persistence.py`, `test_dispatch.py`,
+`test_invitations.py` and `test_table.py` are behind the `postgres` marker. `tests/e2e/patient.py` needs a live backend and a real key; it is not part of
 `make test`.
 
 **`docs/`** — the only place prose lives. `system-map.md` = *intended* architecture,
@@ -100,11 +103,15 @@ shipped at Phase 5a, but escalations and the signature ledger (5b, 5c) have not.
    the model emits speech *or* a tool call, never both. Never give the speech pass tools.
    `tests/test_prompts.py` holds that line.
 3. Nothing medical goes to metrics/telemetry.
-4. Every authorisation decision lives in `shared/auth/` — never an `if user.role == …` in a route
+4. A count on the screen is a count over the caller's whole scope, never over the rows that
+   happen to be on the page. The tiles, the escalation band and the patients table's pills are
+   `reads.overview` and `reads.patients` for that reason: the browser used to derive them from
+   the review table's own fetch, which was right only while that fetch was the entire record.
+5. Every authorisation decision lives in `shared/auth/` — never an `if user.role == …` in a route
    body. `require_role` yields a `CurrentUser` that the query functions in `reads.py` take as a
    **parameter**, so identity reaches the SQL and not just the door. A system that checks the role
    at the door and then queries unscoped is the one that cannot be retrofitted.
-5. A patient never holds a credential. `POST /session` and its two siblings are unauthenticated by
+6. A patient never holds a credential. `POST /session` and its two siblings are unauthenticated by
    design; that is why the routers are split by audience. An invitation token is not a credential:
    it names one interview, is spent when that call starts, and grants nothing else.
 

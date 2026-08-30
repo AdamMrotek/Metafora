@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { PatientSummary } from '@metafora/contracts';
-import { historyOf, isOpen, useRecord } from '../data.tsx';
+import { useRecord } from '../data.tsx';
 import { dob, nhsMasked, relative, stamp } from '../format.ts';
 import { Link, navigate } from '../router.tsx';
 
@@ -17,7 +17,7 @@ import { Link, navigate } from '../router.tsx';
  * would be a round trip to filter something already in memory.
  */
 export function Patients() {
-  const { patients, interviews, loading, error } = useRecord();
+  const { patients, loading, error } = useRecord();
   const [query, setQuery] = useState('');
 
   const rows = useMemo(() => {
@@ -25,19 +25,17 @@ export function Patients() {
     // NHS numbers are read aloud and written down in threes, so the spaces a
     // clinician types are theirs and not the record's.
     const digits = needle.replace(/\D/g, '');
-    return patients
-      .filter(
-        (p) =>
-          !needle ||
-          p.firstName.toLowerCase().includes(needle) ||
-          (digits !== '' && (p.nhsNumber ?? '').includes(digits)),
-      )
-      .sort((a, b) => (b.lastInterviewAt ?? '').localeCompare(a.lastInterviewAt ?? ''));
+    // No sort: `reads.patients` already orders by when something last happened
+    // to each person, so this narrows a list rather than reordering one.
+    return patients.filter(
+      (p) =>
+        !needle ||
+        p.firstName.toLowerCase().includes(needle) ||
+        (digits !== '' && (p.nhsNumber ?? '').includes(digits)),
+    );
   }, [patients, query]);
 
-  const withSomethingOpen = patients.filter(
-    (p) => historyOf(interviews, p.id).filter(isOpen).length > 0,
-  ).length;
+  const withSomethingOpen = patients.filter((p) => p.openCount > 0).length;
 
   return (
     <div className="page">
@@ -109,15 +107,16 @@ export function Patients() {
 }
 
 function Row({ patient }: { patient: PatientSummary }) {
-  const { interviews } = useRecord();
-  const history = historyOf(interviews, patient.id);
-  const last = history[history.length - 1];
-  const next = history.find((row) => row.status === 'queued');
-  const open = history.filter(isOpen).length;
+  // Every one of these is a column on the row now. They used to be derived
+  // here by filtering the dashboard's shared interview list, which stopped
+  // being possible when that list became one page of the review table — and
+  // was already wrong before it, because a "2 open" pill counted from a
+  // hundred-row window is a number that changes when you page.
+  const open = patient.openCount;
   // There is no patient profile screen in this phase, so the arrow opens the
   // most recent interview — which is what someone reaching for the row wants
   // nine times in ten.
-  const href = last ? `/interviews/${last.id}` : undefined;
+  const href = patient.lastInterviewId ? `/interviews/${patient.lastInterviewId}` : undefined;
   const born = dob(patient.dateOfBirth);
 
   return (
@@ -130,12 +129,12 @@ function Row({ patient }: { patient: PatientSummary }) {
         </span>
       </td>
       <td>
-        {last ? (
+        {patient.lastProtocolLabel && patient.lastInterviewAt ? (
           <>
-            {last.protocolLabel} <span className="ver">{last.protocolId.split('_').pop()}</span>
+            {patient.lastProtocolLabel}{' '}
+            <span className="ver">{patient.lastProtocolId?.split('_').pop()}</span>
             <span className="rel">
-              {stamp(last.endedAt ?? last.createdAt)} ·{' '}
-              {relative(last.endedAt ?? last.createdAt)}
+              {stamp(patient.lastInterviewAt)} · {relative(patient.lastInterviewAt)}
             </span>
           </>
         ) : (
@@ -145,9 +144,9 @@ function Row({ patient }: { patient: PatientSummary }) {
         )}
       </td>
       <td>
-        {next?.scheduledFor ? (
+        {patient.nextScheduledFor ? (
           <>
-            {stamp(next.scheduledFor)}
+            {stamp(patient.nextScheduledFor)}
             <span className="rel">invited, not started</span>
           </>
         ) : (
@@ -162,7 +161,7 @@ function Row({ patient }: { patient: PatientSummary }) {
             className={
               open === 0
                 ? 'pill pill--faint'
-                : history.some((r) => r.outcome === 'safety')
+                : patient.hasEscalation
                   ? 'pill pill--danger'
                   : 'pill pill--warn'
             }

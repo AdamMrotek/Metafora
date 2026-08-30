@@ -21,6 +21,11 @@ pytestmark = pytest.mark.postgres
 
 #: Every (status, outcome) pair `format.ts::outcome` has a sentence for. A
 #: branch missing from here is a branch nobody has ever seen rendered.
+#:
+#: `("queued", None)` is drawn by the scheduled card, the Deployments screen and
+#: the detail timeline rather than by the review table — a call still out cannot
+#: be reviewed — so `rows()` below reads both surfaces. The seed still has to
+#: write one, because those three screens are just as undrawn without it.
 EXPECTED = {
     ("completed", "complete"),
     ("abandoned", "safety"),
@@ -50,13 +55,35 @@ async def seeded(pool):
 
 
 async def rows(pool):
-    return [r for r in await reads.interviews(user(), limit=500) if r.id.startswith("iv_demo_")]
+    """Every seeded row a screen draws, across both surfaces.
+
+    The review table holds calls that happened; `overview.queued` holds the ones
+    still out. Together they are the demo record, and a test that read only the
+    first would call the seed incomplete for containing exactly the row the
+    scheduled card exists to draw.
+    """
+    page = await reads.interviews(user(), limit=500)
+    overview = await reads.overview(user())
+    return [r for r in [*page.rows, *overview.queued] if r.id.startswith("iv_demo_")]
+
+
+async def reviewable(pool):
+    """Only what the review table itself shows."""
+    page = await reads.interviews(user(), limit=500)
+    return [r for r in page.rows if r.id.startswith("iv_demo_")]
 
 
 async def test_every_state_the_review_table_can_draw_is_present(seeded):
     seen = {(r.status, r.outcome) for r in await rows(seeded)}
 
     assert EXPECTED <= seen, f"missing: {EXPECTED - seen}"
+
+
+async def test_a_call_still_out_is_not_in_the_review_table(seeded):
+    """The seed writes one, and the review table is not where it belongs: there
+    is nothing to review on a call nobody has taken yet."""
+    assert any(r.status == "queued" for r in await rows(seeded))
+    assert not any(r.status == "queued" for r in await reviewable(seeded))
 
 
 async def test_seeding_twice_writes_the_record_once(seeded):

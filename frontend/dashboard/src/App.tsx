@@ -80,16 +80,19 @@ function Chrome({ account, onSignOut }: { account: Account; onSignOut: () => voi
  * The escalation band.
  *
  * Full bleed, red, above everything. It is not a notification: the count and
- * the clock come from the record, and nothing here clears it — only a human
- * does, in Phase 5, when `clinical.escalations` exists and Schedule means
- * something. Until then the button is inert and says so, because a button that
- * cannot honour what it offers is worse than no button.
+ * the clock come from the record — from `reads.overview`, over the whole
+ * caseload, so the number is the number and not however many happened to be on
+ * the page below — and nothing here clears it. Only a human does, in Phase 5b,
+ * when `clinical.escalations` exists.
  */
 function Rail() {
-  const { interviews } = useRecord();
-  const escalations = interviews
-    .filter((row) => row.outcome === 'safety')
-    .sort((a, b) => (b.endedAt ?? '').localeCompare(a.endedAt ?? ''));
+  const { overview } = useRecord();
+  // Newest first, and counted over the whole caseload — `reads.overview` does
+  // both. Filtering the dashboard's own list here was only ever right while
+  // that list was the whole record, and would have been a count of one page of
+  // the review table the moment the table paged properly.
+  const escalations = overview?.escalations ?? [];
+  const total = overview?.urgent ?? 0;
   const latest = escalations[0];
 
   const [tick, setTick] = useState(0);
@@ -109,9 +112,9 @@ function Rail() {
       <span className="rail__dot" />
       <span className="rail__txt">
         <span className="rail__t">
-          {escalations.length === 1
+          {total === 1
             ? '1 escalation needs a consultation scheduled'
-            : `${escalations.length} escalations need a consultation scheduled`}
+            : `${total} escalations need a consultation scheduled`}
         </span>
         <span className="rail__s">
           {latest.patientFirstName}

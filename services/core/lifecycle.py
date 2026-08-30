@@ -25,8 +25,19 @@ from services.core.config import (
 from services.core.store import Session, end_session, get_session, live_sessions
 from services.core.tokens import mint_token
 
-#: How long a patient's browser has to arrive before we give up on the room.
-PATIENT_TIMEOUT_S = 30.0
+#: How long we wait for *our own* transport to reach the room before giving up.
+#: Nothing is handed to the patient until this resolves, so a slow SFU shows up
+#: as a failed `POST /session` rather than a token for a room with nobody in it.
+ASSISTANT_CONNECT_TIMEOUT_S = 30.0
+
+#: How long a patient's browser has to actually arrive before we close the room.
+#:
+#: `POST /session` returning is not the patient joining. A tab closed or
+#: reloaded in between — or a `room.connect()` that fails on the browser's side
+#: — leaves this process holding a bot, a pipeline task and one of very few
+#: concurrency slots for a room nobody will ever enter. Without this the only
+#: thing that ever notices is `MAX_CALL_SECONDS`, fifteen minutes later.
+PATIENT_TIMEOUT_S = 45.0
 
 #: How long the goodbye may take before we stop waiting for it.
 #:
@@ -40,6 +51,7 @@ GOODBYE_TIMEOUT_S = 10.0
 
 _tasks: dict[str, asyncio.Task] = {}
 _watchdogs: dict[str, asyncio.Task] = {}
+_arrivals: dict[str, asyncio.Task] = {}
 
 
 async def start_call(session: Session) -> str:
@@ -85,7 +97,8 @@ async def start_call(session: Session) -> str:
 
     _tasks[session.id] = asyncio.create_task(_run(session, bot))
     _watchdogs[session.id] = asyncio.create_task(_expire(session.id))
-    await asyncio.wait_for(connected.wait(), timeout=PATIENT_TIMEOUT_S)
+    _arrivals[session.id] = asyncio.create_task(_await_patient(session.id))
+    await asyncio.wait_for(connected.wait(), timeout=ASSISTANT_CONNECT_TIMEOUT_S)
     session.writer.append(RoomJoined(identity="assistant"))
 
     return mint_token(
@@ -97,6 +110,8 @@ def _wire_lifecycle(session: Session, bot) -> None:
     @bot.transport.event_handler("on_first_participant_joined")
     async def _on_joined(_transport, participant):
         identity = _identity(participant)
+        # They made it, so stop counting.
+        _cancel(_arrivals.pop(session.id, None))
         session.writer.append(PatientJoined(identity=identity))
         # Nothing may be said until the patient is in the room: data published
         # to a room they have not joined is not replayed to them on arrival, so
@@ -107,6 +122,16 @@ def _wire_lifecycle(session: Session, bot) -> None:
     @bot.transport.event_handler("on_participant_disconnected")
     async def _on_left(_transport, participant, *_):
         await teardown(session.id, "patient_left")
+
+    # A browser that vanished rather than left — a killed tab, a laptop lid —
+    # takes the SFU tens of seconds of ICE failure to notice, and a browser
+    # whose transport never came up at all is never noticed here. Either way
+    # `_await_patient` is the floor under this handler, not a duplicate of it.
+    @bot.transport.event_handler("on_disconnected")
+    async def _on_transport_left(_transport, *_):
+        # Our own transport is down, so there is no room left to be in. Any
+        # reason already recorded wins; this is only the last resort.
+        await teardown(session.id, "transport_closed")
 
 
 def _identity(participant) -> str:
@@ -171,6 +196,22 @@ async def _run(session: Session, bot) -> None:
         await session.writer.close()
 
 
+async def _await_patient(session_id: str) -> None:
+    """Close a room the patient never reached.
+
+    Cancelled by `on_first_participant_joined`, so this only ever fires for a
+    call nobody joined. `teardown` gives it the same record and the same close
+    as any other ending — the concurrency slot is the thing being reclaimed.
+    """
+    try:
+        await asyncio.sleep(PATIENT_TIMEOUT_S)
+    except asyncio.CancelledError:
+        return
+    if get_session(session_id) is not None:
+        logger.warning(f"[session] {session_id} — nobody joined within {PATIENT_TIMEOUT_S}s")
+        await teardown(session_id, "patient_never_joined")
+
+
 async def _expire(session_id: str) -> None:
     """Hang up a call that has run past `MAX_CALL_SECONDS`.
 
@@ -203,9 +244,8 @@ async def teardown(session_id: str, reason: str) -> None:
         except Exception as exc:
             logger.warning(f"[session] teardown: {exc}")
 
-    watchdog = _watchdogs.pop(session_id, None)
-    if watchdog and not watchdog.done():
-        watchdog.cancel()
+    _cancel(_watchdogs.pop(session_id, None))
+    _cancel(_arrivals.pop(session_id, None))
 
     task = _tasks.pop(session_id, None)
     await _await_goodbye(session_id, task)
@@ -216,6 +256,12 @@ async def teardown(session_id: str, reason: str) -> None:
     # events on the floor.
     if task is None:
         await session.writer.close()
+
+
+def _cancel(task: asyncio.Task | None) -> None:
+    """Cancel a watchdog, unless it is the one we are being run by."""
+    if task is not None and not task.done() and task is not asyncio.current_task():
+        task.cancel()
 
 
 async def _await_goodbye(session_id: str, task: asyncio.Task | None) -> None:
@@ -268,7 +314,7 @@ def _wire_reason(reason: str) -> str:
         return "safety"
     if reason in {"complete", "ended_by_patient"}:
         return "complete"
-    if reason in {"server_shutdown", "max_duration"}:
+    if reason in {"server_shutdown", "max_duration", "patient_never_joined", "transport_closed"}:
         return "interrupted"
     return "error"
 

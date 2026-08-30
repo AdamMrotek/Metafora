@@ -151,7 +151,7 @@ async def test_binding_is_idempotent_across_sign_ins(live_db):
 async def test_interviews_carries_what_the_review_table_renders(live_db):
     interview = await resolve_interview()
 
-    rows = await reads.interviews(user())
+    rows = (await reads.interviews(user())).rows
     row = next(r for r in rows if r.id == interview.id)
 
     assert row.status == "running"
@@ -170,7 +170,7 @@ async def test_a_completed_call_shows_its_outcome(live_db):
     await end_session(session, "complete")
     await session.writer.close()
 
-    rows = await reads.interviews(user())
+    rows = (await reads.interviews(user())).rows
     row = next(r for r in rows if r.id == interview.id)
 
     assert row.status == "abandoned"  # the machine never captured anything
@@ -187,7 +187,7 @@ async def test_the_row_carries_how_much_of_the_script_was_captured(live_db):
     await end_session(session, "complete")
     await session.writer.close()
 
-    rows = await reads.interviews(user())
+    rows = (await reads.interviews(user())).rows
     row = next(r for r in rows if r.id == interview.id)
 
     assert (row.captured_fields, row.total_fields) == (1, 2)
@@ -208,7 +208,7 @@ async def test_an_interview_with_no_results_yet_meters_against_the_script(live_d
         for section in PROTOCOLS[interview.protocol_id].script.sections
     )
 
-    row = next(r for r in await reads.interviews(user()) if r.id == interview.id)
+    row = next(r for r in (await reads.interviews(user())).rows if r.id == interview.id)
 
     assert (row.captured_fields, row.total_fields) == (0, declared) == (0, 2)
 
@@ -219,7 +219,7 @@ async def test_the_review_table_is_bounded(live_db):
     for _ in range(3):
         await resolve_interview()
 
-    assert len(await reads.interviews(user(), limit=2)) == 2
+    assert len((await reads.interviews(user(), limit=2)).rows) == 2
     assert reads.clamp(10_000) == reads.MAX_LIMIT
     assert reads.clamp(None) == reads.DEFAULT_LIMIT
 
@@ -293,7 +293,7 @@ async def test_a_clinician_does_not_see_another_clinicians_interview(live_db):
     his = await a_patient_of(live_db, BOB, first_name="Bruno")
     his_interview = await an_interview_for(live_db, his)
 
-    assert his_interview not in {r.id for r in await reads.interviews(user(ALICE))}
+    assert his_interview not in {r.id for r in (await reads.interviews(user(ALICE))).rows}
 
     with pytest.raises(reads.NotFound):
         await reads.interview(user(ALICE), his_interview)
@@ -307,8 +307,8 @@ async def test_the_unowned_demo_rows_are_visible_to_everyone(live_db):
     dispatched those calls, and hiding them would leave the dashboard empty."""
     interview = await resolve_interview()
 
-    assert interview.id in {r.id for r in await reads.interviews(user(ALICE))}
-    assert interview.id in {r.id for r in await reads.interviews(user(BOB))}
+    assert interview.id in {r.id for r in (await reads.interviews(user(ALICE))).rows}
+    assert interview.id in {r.id for r in (await reads.interviews(user(BOB))).rows}
 
 
 async def test_the_patients_screen_distinguishes_a_demo_visitor(live_db):
@@ -353,7 +353,7 @@ async def test_the_summaries_carry_the_identity_the_dashboard_draws(live_db):
     table read them here now, which is the whole of Phase 5·0."""
     interview = await resolve_interview()
 
-    row = next(r for r in await reads.interviews(user(ALICE)) if r.id == interview.id)
+    row = next(r for r in (await reads.interviews(user(ALICE))).rows if r.id == interview.id)
     patient = next(p for p in await reads.patients(user(ALICE)) if p.id == interview.patient.id)
 
     assert row.patient_nhs_number is not None

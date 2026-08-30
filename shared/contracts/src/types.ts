@@ -166,6 +166,66 @@ export interface InterviewSummary {
   createdAt: string;
 }
 
+/**
+ * One entry of the composer's *what* field.
+ *
+ * The id and the label only. A composer that had to fetch whole
+ * `ProtocolVersion`s to fill a select would be pulling every question of every
+ * protocol across to draw four words.
+ */
+export interface ProtocolOption {
+  id: string;
+  label: string;
+}
+
+/**
+ * One page of the review table, and enough to draw the pager under it.
+ *
+ * The rows used to be the whole list: `GET /interviews` returned the hundred
+ * most recent and the browser sorted, searched and paged them. That is fine at
+ * twenty interviews and wrong at a hundred and one, because the browser would
+ * be triaging a window it cannot see past — so `total` is here, counted in the
+ * same statement as the rows, and it is the number that says whether anything
+ * was left out.
+ */
+export interface InterviewPage {
+  rows: InterviewSummary[];
+  /** Rows matching the filter across the caller's whole scope, not on this page. */
+  total: number;
+  page: number;
+  /** Always at least 1, so an empty table still reads "page 1 of 1" rather */
+  /** than "page 1 of 0". */
+  pages: number;
+}
+
+/**
+ * Everything on the dashboard that is not one page of the table.
+ *
+ * It exists because the table stopped being the whole list. Every one of these
+ * was computed in the browser from the same fetch the table used, which was
+ * workable only while that fetch was the whole record — the moment it became
+ * one page of eight, a tile counting it would have been counting a page and
+ * calling it the caseload.
+ */
+export interface Overview {
+  /** The three tiles. Three errands, not a census: what the gate stopped, what */
+  /** it flagged on a call that ran on, and what neither happened to but which */
+  /** stopped short of its script. */
+  urgent: number;
+  flagged: number;
+  incomplete: number;
+  /** Open escalations, newest first, for the band above every screen. Capped — */
+  /** `urgent` is the count it states. */
+  escalations: InterviewSummary[];
+  /** Calls still out, soonest first: the scheduled card and the Deployments */
+  /** screen's upcoming table are the same rows asked twice. */
+  queued: InterviewSummary[];
+  /** What the protocol filter may offer — the protocols present in this */
+  /** caller's record, never every protocol that exists. A filter listing an */
+  /** option that selects nothing is a filter that lies about the record. */
+  protocols: ProtocolOption[];
+}
+
 /** One captured field, as the review composer renders it. */
 export interface ResultField {
   fieldKey: string;
@@ -200,6 +260,12 @@ export interface InterviewDetail {
   interview: InterviewSummary;
   results: ResultField[];
   events: TranscriptEvent[];
+  /** Every interview for this patient, oldest first, including this one — the */
+  /** detail screen's timeline. Fetched with the thing it is a timeline of, */
+  /** rather than filtered out of the dashboard's list, so opening an interview */
+  /** directly from a bookmark draws the same screen as reaching it from the */
+  /** table. */
+  history: InterviewSummary[];
 }
 
 /**
@@ -249,20 +315,24 @@ export interface PatientSummary {
   /** Null for a demo visitor — nobody was dispatched a call to them. */
   clinicianEmail: string | null;
   interviewCount: number;
+  /** When something last happened to them — the end of their last call, or its */
+  /** start, or when it was queued. Null for a patient nobody has called. */
   lastInterviewAt: string | null;
+  /** Their last finished call, which is what the row's arrow opens and what */
+  /** its middle column names. All three null together. */
+  lastInterviewId: string | null;
+  lastProtocolId: string | null;
+  lastProtocolLabel: string | null;
+  /** The slot on their next call still out, if one is. */
+  nextScheduledFor: string | null;
+  /** What is still owed on them: calls the gate stopped, and calls that did */
+  /** not finish. Counted server-side because a count taken from one page of */
+  /** the review table changes when you turn the page. */
+  openCount: number;
+  /** Whether any of those was the gate stopping a call, which is what decides */
+  /** the pill is red rather than amber. */
+  hasEscalation: boolean;
   createdAt: string;
-}
-
-/**
- * One entry of the composer's *what* field.
- *
- * The id and the label only. A composer that had to fetch whole
- * `ProtocolVersion`s to fill a select would be pulling every question of every
- * protocol across to draw four words.
- */
-export interface ProtocolOption {
-  id: string;
-  label: string;
 }
 
 /**
@@ -357,6 +427,8 @@ export type CallPhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'ended'
 export type InterviewStatus = 'queued' | 'running' | 'completed' | 'abandoned';
 
 export type PatientOrigin = 'demo' | 'dispatched';
+
+export type InterviewSort = 'urgency' | 'recent';
 
 export type InvitationChannel = 'link' | 'email';
 

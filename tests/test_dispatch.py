@@ -163,9 +163,13 @@ async def test_nothing_is_written_when_a_dispatch_is_refused(live_db):
 
 
 async def test_a_dispatched_row_appears_for_its_owner(live_db):
+    """On the overview's queued list, which is what the scheduled card and the
+    Deployments screen draw. Not in the review table: a call nobody has taken
+    yet has nothing to review."""
     summary = await dispatch.create_interview(user(ALICE), to("Omar"))
 
-    assert summary.id in {row.id for row in await reads.interviews(user(ALICE))}
+    assert summary.id in {row.id for row in (await reads.overview(user(ALICE))).queued}
+    assert summary.id not in {row.id for row in (await reads.interviews(user(ALICE))).rows}
 
 
 async def test_a_dispatched_row_is_invisible_to_another_clinician(live_db):
@@ -173,7 +177,7 @@ async def test_a_dispatched_row_is_invisible_to_another_clinician(live_db):
     the repo that could fail: before dispatch, nothing set an owner."""
     summary = await dispatch.create_interview(user(ALICE), to("Omar"))
 
-    assert summary.id not in {row.id for row in await reads.interviews(user(BOB))}
+    assert summary.id not in {row.id for row in (await reads.overview(user(BOB))).queued}
     with pytest.raises(reads.NotFound):
         await reads.summary(user(BOB), summary.id)
 

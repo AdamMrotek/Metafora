@@ -24,6 +24,7 @@ from services.core.app import app
 from shared import auth
 from shared.auth import CurrentUser
 from shared.auth.verify import InvalidToken
+from shared.contracts.models import InterviewPage
 
 ISSUER = "https://project.supabase.co/auth/v1"
 CLINICIAN = "clinician@example.test"
@@ -42,6 +43,8 @@ GUARDED = [
     ("GET", "/patients"),
     ("GET", "/experience"),
     ("GET", "/protocols"),
+    ("GET", "/overview"),
+    ("GET", "/patients/pt_anything/interviews"),
     ("GET", "/me"),
     ("POST", "/interviews"),
     ("POST", "/interviews/iv_anything/invitation"),
@@ -310,10 +313,21 @@ async def test_an_admin_reads_the_record_too(door, signing_key, monkeypatch):
 # ─── who gets in ─────────────────────────────────────────────────────────────
 
 
+def _no_rows() -> InterviewPage:
+    """An empty page, which is what `GET /interviews` answers with now.
+
+    The route declares `InterviewPage`, so a stub returning a bare list fails
+    response validation rather than the assertion the test is about — and a
+    stub that quietly returned the wrong shape would be the more annoying of
+    the two outcomes.
+    """
+    return InterviewPage(rows=[], total=0, page=0, pages=1)
+
+
 async def _empty_list(user, **_kwargs):
     """Stands in for the query. What it returns is `tests/test_reads.py`'s
     subject; what matters here is that it was reached at all."""
-    return []
+    return _no_rows()
 
 
 async def test_a_seeded_clinician_gets_through(door, signing_key, monkeypatch):
@@ -322,7 +336,7 @@ async def test_a_seeded_clinician_gets_through(door, signing_key, monkeypatch):
     response = await get("/interviews", token(signing_key))
 
     assert response.status_code == 200
-    assert response.json() == []
+    assert response.json() == {"rows": [], "total": 0, "page": 0, "pages": 1}
 
 
 async def test_a_clinician_is_told_who_they_are(door, signing_key):
@@ -538,7 +552,7 @@ async def test_the_email_is_lowered_so_one_mailbox_is_one_account(door, signing_
 
     async def capture(user, **_kwargs):
         seen.append(user.email)
-        return []
+        return _no_rows()
 
     monkeypatch.setattr(reads, "interviews", capture)
 

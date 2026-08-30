@@ -26,7 +26,7 @@ import { navigate } from '../router.tsx';
  *   The send row says exactly that rather than implying a dial-out.
  */
 export function Deployments() {
-  const { interviews, patients, reload } = useRecord();
+  const { overview, patients, reload } = useRecord();
   const [protocols, setProtocols] = useState<ProtocolOption[]>([]);
 
   const [patientId, setPatientId] = useState('');
@@ -60,15 +60,10 @@ export function Deployments() {
     [patients],
   );
 
-  const upcoming = useMemo(
-    () =>
-      interviews
-        .filter((row) => row.status === 'queued')
-        .sort((a, b) =>
-          (a.scheduledFor ?? a.createdAt).localeCompare(b.scheduledFor ?? b.createdAt),
-        ),
-    [interviews],
-  );
+  // Already filtered to `queued` and ordered soonest-first by `reads.overview`
+  // — the dashboard's scheduled card and this table are the same rows asked
+  // twice, so they are answered once.
+  const upcoming = overview?.queued ?? [];
 
   const naming = patientId === 'new' ? firstName.trim() : patientId;
   const chosen = roster.find((p) => p.id === patientId);

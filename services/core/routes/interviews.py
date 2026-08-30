@@ -16,8 +16,11 @@ from shared.auth import READS_THE_RECORD, ClinicalReader, require_role
 from shared.contracts.models import (
     DispatchRequest,
     InterviewDetail,
+    InterviewPage,
+    InterviewSort,
     InterviewSummary,
     Invitation,
+    Overview,
     ProtocolOption,
 )
 
@@ -36,10 +39,51 @@ router = APIRouter(
 @router.get("/interviews")
 async def list_interviews(
     user: ClinicalReader,
+    sort: InterviewSort = "urgency",
+    q: str | None = Query(default=None, max_length=120),
+    protocol: str | None = Query(default=None, max_length=120),
+    page: int = Query(default=0, ge=0),
     limit: int = Query(default=reads.DEFAULT_LIMIT, ge=1, le=reads.MAX_LIMIT),
-) -> list[InterviewSummary]:
-    """The review table: status, outcome, patient first name, protocol, times."""
-    return await reads.interviews(user, limit=limit)
+) -> InterviewPage:
+    """One page of the review table, ordered and filtered by the database.
+
+    Every parameter used to be a decision the browser made about a hundred rows
+    it had already been given. That was workable while the record was small and
+    silently wrong once it was not — a caller cannot triage a window it cannot
+    see past — so the sort, the search, the protocol filter and the page all
+    happen where the whole record is, and `total` comes back with the rows.
+
+    `sort` is a `Literal`, so an unknown one is a 422 from the validator rather
+    than a branch here.
+    """
+    return await reads.interviews(
+        user, sort=sort, search=q, protocol_id=protocol, page=page, limit=limit
+    )
+
+
+@router.get("/overview")
+async def get_overview(user: ClinicalReader) -> Overview:
+    """The three tiles, the escalation band, what is still out, and the protocol
+    filter's options — every dashboard number that is about the whole caseload
+    rather than about one page of it.
+
+    A separate route rather than fields on the page above, because these do not
+    change when a clinician sorts a table or types in its search box, and a
+    dashboard that recounted its escalations on every keystroke would be
+    spending a query to redraw a number that cannot have moved.
+    """
+    return await reads.overview(user)
+
+
+@router.get("/patients/{patient_id}/interviews")
+async def patient_history(patient_id: str, user: ClinicalReader) -> list[InterviewSummary]:
+    """One patient's interviews, oldest first — scoped like everything else.
+
+    The id arrives from a row the caller was already shown, and a route that
+    treated that as permission would be one guessed id away from reading
+    somebody else's history.
+    """
+    return await reads.history(user, patient_id)
 
 
 @router.get("/interviews/{interview_id}")
