@@ -123,16 +123,6 @@ def _wire_lifecycle(session: Session, bot) -> None:
     async def _on_left(_transport, participant, *_):
         await teardown(session.id, "patient_left")
 
-    # A browser that vanished rather than left — a killed tab, a laptop lid —
-    # takes the SFU tens of seconds of ICE failure to notice, and a browser
-    # whose transport never came up at all is never noticed here. Either way
-    # `_await_patient` is the floor under this handler, not a duplicate of it.
-    @bot.transport.event_handler("on_disconnected")
-    async def _on_transport_left(_transport, *_):
-        # Our own transport is down, so there is no room left to be in. Any
-        # reason already recorded wins; this is only the last resort.
-        await teardown(session.id, "transport_closed")
-
 
 def _identity(participant) -> str:
     if isinstance(participant, dict):
@@ -314,7 +304,7 @@ def _wire_reason(reason: str) -> str:
         return "safety"
     if reason in {"complete", "ended_by_patient"}:
         return "complete"
-    if reason in {"server_shutdown", "max_duration", "patient_never_joined", "transport_closed"}:
+    if reason in {"server_shutdown", "max_duration", "patient_never_joined"}:
         return "interrupted"
     return "error"
 

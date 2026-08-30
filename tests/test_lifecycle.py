@@ -137,20 +137,6 @@ async def test_a_patient_who_arrives_is_not_hung_up_on(bots, monkeypatch):
         assert store.get_session(session_id).ended is False
 
 
-async def test_the_bots_own_transport_going_down_ends_the_call(bots):
-    """The floor under `on_participant_disconnected`. That fires only when the
-    SFU tells us a participant left; if our own transport is what went away,
-    nothing else would ever notice the call is over.
-    """
-    async with client() as http:
-        session_id = (await start(http)).json()["session"]["sessionId"]
-        await bots.latest.transport.fire("on_disconnected")
-
-    session = store.get_session(session_id)
-    assert session.ended is True
-    assert session.ended_reason == "transport_closed"
-
-
 async def test_drain_ends_every_live_call(bots):
     """A restart drops every call on the box, so the goodbye is the difference
     between a patient hearing a sentence and hearing silence.
@@ -176,7 +162,6 @@ async def test_drain_ends_every_live_call(bots):
         ("server_shutdown", "interrupted"),
         ("max_duration", "interrupted"),
         ("patient_never_joined", "interrupted"),
-        ("transport_closed", "interrupted"),
         ("pipeline_finished", "error"),
     ],
 )
