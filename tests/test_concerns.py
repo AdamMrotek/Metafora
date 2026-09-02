@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     EndWorkerFrame,
-    LLMFullResponseStartFrame,
     LLMTextFrame,
     TTSSpeakFrame,
 )
@@ -28,9 +27,10 @@ from services.agent import concerns
 from services.agent.config.protocol import (
     PREOP_CHECK_V2,
     PREOP_SHORT_V2,
+    PROTOCOLS,
     WARMUP_V1,
 )
-from services.agent.end_call import EndOfInterview, _HoldOver
+from services.agent.end_call import EndOfInterview
 from services.agent.machine import InterviewMachine
 from services.agent.tools import dispatch
 
@@ -101,7 +101,7 @@ def question(protocol, field_key):
 
 def test_a_declared_value_raises_without_asking_anyone():
     """The enum member is the trigger. Nothing about the flag was judged — the
-    capture pass classified into a closed list and the protocol did the rest."""
+    model classified into a closed list and the protocol did the rest."""
     result = concerns.resolve(
         question(PREOP_CHECK_V2, "attendance"), answer="cannot_attend", named=None
     )
@@ -259,17 +259,27 @@ async def test_the_value_recorded_is_still_the_patient_s_own_words():
 
 
 async def test_a_concern_is_resolved_against_the_current_question_not_the_field_named():
-    """`field` may name a question that has not been asked — the matrix
-    constrains the state, not the key. A flag authored on a question nobody
-    asked is not something this answer raised."""
-    machine, writer = InterviewMachine(PREOP_CHECK_V2), RecordingWriter()
-    await record(machine, writer, "meds_stopped", "still on them",
-                 answer="still_taking", flag="qf_meds_still_taking")
+    """`field` may still name a question other than the live one — a patient
+    correcting an earlier answer is recording the question that was asked, late,
+    and that is allowed. A flag authored on *that* question is not something
+    this answer raised, so the live question's flags are what it is resolved
+    against.
 
-    event = raised(writer)[0]
-    assert event.field == "attendance", "the question that was actually live"
+    Fields *ahead* of the cursor no longer reach here at all: `dispatch` refuses
+    them, because a question that answers itself before it is asked is also a
+    question that never advances the interview (`machine.reached`).
+    """
+    machine, writer = InterviewMachine(PREOP_CHECK_V2), RecordingWriter()
+    await record(machine, writer, "attendance", "yes, I'll be there", answer="confirmed")
+    assert machine.current.question.field_key == "escort_home"
+
+    await record(machine, writer, "attendance", "actually I can still make it",
+                 answer="confirmed", flag="qf_attendance_cannot")
+
+    event = raised(writer)[-1]
+    assert event.field == "escort_home", "the question that was actually live"
     assert event.hits == []
-    assert event.ignored == "qf_meds_still_taking"
+    assert event.ignored == "qf_attendance_cannot"
 
 
 # ─── the tool schema ─────────────────────────────────────────────────────────
@@ -279,11 +289,12 @@ def schema(protocol):
     return InterviewMachine(protocol).tool_definitions()[0]["parameters"]
 
 
-def test_a_protocol_that_authors_neither_gets_the_schema_it_always_had():
-    """Nothing is asked of a model that has nothing to answer with."""
+def test_a_protocol_that_authors_neither_gets_only_what_every_turn_needs():
+    """Nothing is asked of a model that has nothing to answer with. What is left
+    is the turn itself: the field, the words, and what to say next."""
     params = schema(WARMUP_V1)
-    assert set(params["properties"]) == {"field", "value"}
-    assert params["required"] == ["field", "value"]
+    assert set(params["properties"]) == {"field", "value", "message_next"}
+    assert params["required"] == ["field", "value", "message_next"]
 
 
 def test_the_answer_and_flag_enums_are_closed_by_the_protocol():
@@ -299,9 +310,28 @@ def test_the_answer_and_flag_enums_are_closed_by_the_protocol():
         "qf_meds_still_taking",
         "qf_meds_unsure",
         "qf_health_change",
+        # The closing question authors one now: what a patient raises on their
+        # own turn is the answer to `anything_else`, and leaving it to the gate
+        # meant a symptom in their own words matched no pattern.
+        "qf_closing_concern",
         "none",
     ]
-    assert params["required"] == ["field", "value", "flag"]
+    assert params["required"] == ["field", "value", "flag", "message_next"]
+
+
+@pytest.mark.parametrize("protocol", list(PROTOCOLS.values()), ids=lambda p: p.id)
+def test_the_sentence_is_the_last_argument_and_never_optional(protocol):
+    """`message_next` is on every schema, because it is the shape of the turn —
+    what the patient hears is an argument of the call that records what they
+    just said.
+
+    Last, so the model writes it after it has settled what it is recording.
+    Required, because an optional sentence is a silent turn whenever the model
+    omits it.
+    """
+    params = InterviewMachine(protocol).tool_definitions()[0]["parameters"]
+    assert list(params["properties"])[-1] == "message_next"
+    assert params["required"][-1] == "message_next"
 
 
 def test_the_short_protocol_offers_only_the_flags_it_carries():
@@ -312,11 +342,13 @@ def test_the_short_protocol_offers_only_the_flags_it_carries():
         "qf_attendance_at_risk",
         "qf_meds_still_taking",
         "qf_meds_unsure",
+        # Not one of the two it kept — the closing question is on every script.
+        "qf_closing_concern",
         "none",
     ]
 
 
-# ─── the ending, and the sentence that has to wait for a gap ─────────────────
+# ─── the ending, and the sentence the system says rather than the model ─────
 
 
 class FakeWire:
@@ -338,8 +370,9 @@ def ending():
     """The processor with its two outward moves recorded rather than made.
 
     `queue_frame` is the one that matters: `stop()` hands the decision to this
-    processor's own task rather than acting on the capture branch's, so the test
-    delivers what it queued the way the real task would.
+    processor's own task rather than acting on the function-call task it is
+    called from, so the test delivers what it queued the way the real task
+    would.
     """
     machine, writer, wire = InterviewMachine(PREOP_CHECK_V2), RecordingWriter(), FakeWire()
     end = EndOfInterview(machine, writer, wire)
@@ -391,9 +424,11 @@ async def test_the_reason_is_filed_the_moment_the_concern_lands(ending):
     assert writer.ending_reason == "safety"
 
 
-async def test_the_speech_pass_is_silenced_from_the_moment_the_concern_lands(ending):
-    """The sentence it is streaming answers a question the interview is no
-    longer asking. It never reaches the TTS, because this sits above it."""
+async def test_anything_still_in_flight_is_silenced_from_the_moment_it_lands(ending):
+    """Text already on its way answers a question the interview is no longer
+    asking. It never reaches the TTS, because this sits above it. Usually there
+    is none — `next_message.py` withheld the sentence before it was ever
+    generated — so this is the backstop, not the mechanism."""
     end, pushed, _, _ = ending
     await end.stop(BlockingResult())
 
@@ -416,8 +451,8 @@ async def test_the_closure_interrupts_what_is_already_playing(ending):
 
 
 async def test_the_authored_sentence_is_the_only_thing_the_patient_hears(ending):
-    """The whole point. A speech pass mid-sentence, a concern, and one sentence
-    comes out — the protocol's, not the model's."""
+    """The whole point. A reply mid-sentence, a concern, and one sentence comes
+    out — the protocol's, not the model's."""
     end, pushed, _, _ = ending
     await end.process_frame(LLMTextFrame("I hear you're not feeling up to it."),
                             FrameDirection.DOWNSTREAM)
@@ -478,98 +513,3 @@ async def test_a_call_that_raises_nothing_still_ends_the_way_it_always_did(endin
     assert ("ended", "complete", None) in wire.calls
     assert [f for f, _ in pushed if isinstance(f, EndWorkerFrame)]
     assert end.interruptions == []
-
-
-# ─── the hold: the reply waits for the other pass, on one kind of question ───
-#
-# Both passes run on the same turn, so which finishes first is a race. It only
-# matters on a question whose flags include an `end_call`, and there it matters
-# entirely: the speech pass is answering as though the interview continues while
-# the capture pass is deciding that it does not. Measured, they normally finish
-# within ~700 ms of each other; on `iv_5abb66a97374` the capture pass was 8.4 s
-# late and a sentence got out. See `tuning.CONCERN_HOLD_MS`.
-
-
-async def begin_reply(end):
-    await end.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
-
-
-async def test_the_reply_waits_on_a_question_that_can_stop_the_call(ending):
-    end, pushed, _, _ = ending
-    assert end._machine.current.id == "s1.q1", "attendance — the one with an end_call flag"
-
-    await begin_reply(end)
-    await end.process_frame(LLMTextFrame("I hear you can't make it."),
-                            FrameDirection.DOWNSTREAM)
-    assert [f for f, _ in pushed if isinstance(f, LLMTextFrame)] == [], "held, not spoken"
-
-
-async def test_a_clean_answer_releases_it_in_order(ending):
-    """The common case, and it has to cost nothing: the capture pass rules, the
-    reply goes out exactly as it was written."""
-    end, pushed, _, _ = ending
-    await begin_reply(end)
-    for text in ("I hear you.", " Were you able to stop your apixaban?"):
-        await end.process_frame(LLMTextFrame(text), FrameDirection.DOWNSTREAM)
-
-    await end.answered(concerns.ConcernResult())
-    await deliver_queued(end)
-
-    assert [f.text for f, _ in pushed if isinstance(f, LLMTextFrame)] == [
-        "I hear you.",
-        " Were you able to stop your apixaban?",
-    ]
-
-
-async def test_a_blocking_answer_means_it_is_never_released(ending):
-    """The reply is not late, it is wrong — it answers a question the interview
-    has stopped asking. Nothing of it is spoken, and the closure is."""
-    end, pushed, _, _ = ending
-    await begin_reply(end)
-    await end.process_frame(LLMTextFrame("Were you able to stop your apixaban?"),
-                            FrameDirection.DOWNSTREAM)
-
-    await end.answered(BlockingVerdict())
-    await deliver_queued(end)
-
-    assert [f for f, _ in pushed if isinstance(f, LLMTextFrame)] == []
-    assert spoken(pushed) == ["I'm sorry to hear that. Goodbye."]
-
-
-async def test_the_wait_is_bounded_and_the_reply_goes_out_anyway(ending):
-    """The outlier. Nothing here can rescue a pass that is eight seconds late —
-    this is only the bound on how long the patient sits in silence first. Past
-    it the call behaves exactly as it did before the hold existed."""
-    end, pushed, _, _ = ending
-    await begin_reply(end)
-    await end.process_frame(LLMTextFrame("I hear you can't make it."),
-                            FrameDirection.DOWNSTREAM)
-    assert [f for f, _ in pushed if isinstance(f, LLMTextFrame)] == []
-
-    # What `_expire` queues once its sleep is over.
-    await end.queue_frame(_HoldOver())
-    await deliver_queued(end)
-
-    assert [f.text for f, _ in pushed if isinstance(f, LLMTextFrame)] == [
-        "I hear you can't make it."
-    ]
-
-
-async def test_nothing_is_held_on_a_question_that_cannot_stop_the_call(ending):
-    """Every other turn of every other question is untouched. The hold costs a
-    patient time, so it is spent only where the answer could make the reply
-    wrong."""
-    end, pushed, _, _ = ending
-    machine = end._machine
-    machine.note_turn()
-    machine.capture("attendance", "yes")
-    machine.advance()
-    assert machine.current.id == "s1.q2", "escort_home — flagged, but nothing that stops"
-
-    await begin_reply(end)
-    await end.process_frame(LLMTextFrame("And have you got someone?"),
-                            FrameDirection.DOWNSTREAM)
-
-    assert [f.text for f, _ in pushed if isinstance(f, LLMTextFrame)] == [
-        "And have you got someone?"
-    ], "straight through, no wait"

@@ -27,25 +27,34 @@ browser taps Start
   → LiveKit transport      the assistant is already in the room
   → Groq STT (whisper)     speech → text
   → SafetyGate             before the context, before the model — in the path
-  → two passes at once     speech (no tools, heard) ‖ capture (tools, silent)
+  → one LLM pass           tools; the reply rides in the call's `message_next`
+  → NextMessage            releases that sentence once the record is written
   → Groq TTS (Orpheus)     trimmed, 200-char capped, synthesise-ahead
   → transport output       paced back into the track
   → EndOfInterview         hang up once the last answer has been spoken
   → session log            every step, to logs/<sessionId>.jsonl
 ```
 
-**Why two passes.** gpt-oss emits speech *or* a tool call in a turn, never both
-— re-verified against the live API on 23 August 2026, where it returned a tool
-call and empty `content` in 5 trials out of 5. A single pass holding the tool
-schema therefore goes silent on exactly the turn the patient just answered. So
-the two run concurrently in a `ParallelPipeline`: the speech pass carries no
-tools and starts streaming immediately, and the capture pass writes the record
-while that audio is still playing. Only the capture pass is ever told that
-tools exist — telling the speech pass to "call update_intake" without giving it
-the schema is an instruction it can only obey by reading the call out loud, and
-it did, to a patient. `tests/test_prompts.py` holds that line.
+**Why the reply rides in the tool call.** gpt-oss emits speech *or* a tool call
+in a turn, never both — re-verified against the live API on 23 August 2026,
+where it returned a tool call and empty `content` in 5 trials out of 5. That
+used to be answered by splitting the turn across two passes running side by
+side, one speaking and one recording. The split bought an immediate first
+sentence and cost the thing a clinical interview cannot afford: the two could
+not see each other, so on the closing question one of them recorded the last
+field and ended the call while the other asked the patient what they wanted to
+say, into a line that was already closing.
 
-The call ends itself: the capture pass records each answer with `update_intake`,
+So `update_intake` carries a required `message_next` — what to say out loud once
+this answer is recorded — and `services/agent/next_message.py` releases it into
+the speech path *after* `tools.dispatch` has written the record and ruled on it.
+The record and the reply are one decision, made once, in that order; a capture
+that stops the call suppresses the model's sentence before it is ever
+synthesised. It costs first-token latency, and `docs/adr/single-pass-turn.md` is the
+decision record. A turn that records nothing — a follow-up, a question back — is
+plain text and streams as it always did.
+
+The call ends itself: each answer is recorded with `update_intake`,
 the interview machine steps, and when every question is answered the pipeline
 says the goodbye, tells the browser the call ended, and closes the room. The
 safety gate can also end a call, in its own sentence — it speaks first and

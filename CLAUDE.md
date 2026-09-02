@@ -38,7 +38,8 @@ already sent and the table still stores only its hash.
 **`services/agent/`** — the conversation.
 - `pipeline.py` — assembles the Pipecat pipeline. **Start here** for anything about call flow.
 - `machine.py` — interview state machine; `config/protocol.py` is the hardcoded question set.
-- `prompts.py` — the two system prompts (speech / capture). `capture.py`, `tools.py` — tool pass.
+- `prompts.py` — the one system prompt: how to speak *and* the tool. `tools.py` — the tool pass.
+- `next_message.py` — lifts `message_next` out of the tool call and speaks it, after the record.
 - `safety.py` + `gate.py` — deterministic red-flag gate, runs before generation.
 - `tts.py`, `tts_text.py` — Groq/Orpheus chunking and trimming. `end_call.py` — hangup.
 - `wire.py` (→ browser), `observer.py` + `session_log.py` (→ `logs/<sessionId>.jsonl`).
@@ -114,9 +115,12 @@ an open dashboard on the next fetch, which is why there is no `notified_at` colu
 ## Invariants
 
 1. `shared/contracts/src/*.ts` is generated, never hand-edited. `make contracts` after model changes.
-2. Two LLM passes in a `ParallelPipeline` — speech (no tools) and capture (tools, silent) — because
-   the model emits speech *or* a tool call, never both. Never give the speech pass tools.
-   `tests/test_prompts.py` holds that line.
+2. One LLM pass, holding the tools, answering *through* them: `update_intake` carries a required
+   `message_next` and `next_message.py` releases that sentence only after `dispatch` has written
+   the record and ruled on it. The model emits speech *or* a tool call, never both, so the reply
+   has to travel in the arguments. The record and the sentence said next are one decision — that
+   is the whole invariant, and it is why the closing question cannot end the call while another
+   pass asks into a dead line. `tests/test_prompts.py` + `tests/test_next_message.py` hold it.
 3. Nothing medical goes to metrics/telemetry.
 4. A count on the screen is a count over the caller's whole scope, never over the rows that
    happen to be on the page. The tiles, the escalation band and the patients table's pills are

@@ -1,10 +1,20 @@
-# Example interview — `proto_preop_check_v1`
+# Example interview — `proto_preop_check_v2`
 
 One protocol written out end to end: the config, the call it produces, and what
-each of the three surfaces does with the result. **Not running code** — the
-runtime ships `WARMUP_V1` (`services/agent/config/protocol.py`) and nothing
-else. This is the worked example the other three docs point at, and the thing
-the studio would have to be able to emit.
+each of the three surfaces does with the result. This is the worked example the
+other three docs point at, and the thing the studio would have to be able to
+emit.
+
+> **This doc describes the first generation of the script.** It was written
+> before the flags moved, and `services/agent/config/protocol.py` is the
+> authority. Three things have changed since, and the tables below still show
+> the old shape: `rf_fitness_change` and `rf_anticoagulant_taken` are authored
+> `soft_review` now rather than `urgent_escalate`, because the gate matches
+> their phrases anywhere in a call on any subject; `nf_anxiety` is gone, because
+> a call with no flag already says what `note_only` said; and the questions
+> carry `QuestionFlag`s of their own, evaluated against the answer to the
+> question that asked, which is the half a phrase match cannot reach. The one
+> flag that reads as urgent on the gate is now `surgical_site_change`.
 
 ## Why this one
 

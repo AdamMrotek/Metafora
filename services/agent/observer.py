@@ -63,24 +63,13 @@ class SessionLogObserver(BaseObserver):
         self,
         writer: SessionWriter,
         *,
-        speech_llm=None,
         floor_ms: float = ENDPOINT_SILENCE_MS,
     ) -> None:
-        """`speech_llm` is the pass the patient can hear.
-
-        An observer sees every branch of a `ParallelPipeline`, so without this
-        the capture pass's discarded prose lands in the transcript as if it had
-        been spoken — which it never was.
-        """
         super().__init__()
         self._writer = writer
-        self._speech_llm = speech_llm
         self._floor_ms = floor_ms
         self._seen: dict[int, None] = {}
         self._reset_turn()
-
-    def _is_heard(self, data: FramePushed) -> bool:
-        return self._speech_llm is None or data.source is self._speech_llm
 
     def _reset_turn(self) -> None:
         # The clock starts when the patient stopped talking, not when we noticed.
@@ -146,16 +135,13 @@ class SessionLogObserver(BaseObserver):
             )
 
         elif isinstance(frame, LLMTextFrame):
-            # Only what the patient can hear is the reply.
-            if not self._is_heard(data):
-                return
             if self._t_first_token is None:
                 self._t_first_token = now
             self._reply += frame.text
 
         elif isinstance(frame, FunctionCallResultFrame):
-            # A result is pushed both ways through the branch, so count the
-            # call, not the sighting.
+            # A result is broadcast both ways, so count the call, not the
+            # sighting.
             self._tool_call_ids.add(frame.tool_call_id or str(frame.id))
 
         elif isinstance(frame, TTSTextFrame):
@@ -169,7 +155,7 @@ class SessionLogObserver(BaseObserver):
                 self._log_latency()
 
         elif isinstance(frame, LLMFullResponseEndFrame):
-            if not self._is_heard(data) or self._logged_llm:
+            if self._logged_llm:
                 return
             if self._reply.strip() or self._tool_call_ids:
                 self._logged_llm = True

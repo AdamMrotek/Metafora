@@ -96,7 +96,7 @@ class ConcernRaised(_Event):
     hits: list[str]
     #: The worst action across `hits`, ranked by `safety.SEVERITY`.
     action: str | None = None
-    #: The enum member the capture pass classified the answer into, if the
+    #: The enum member the model classified the answer into, if the
     #: question declared any. The `value` trigger's whole input.
     answer: str | None = None
     #: The subset of `hits` a table lookup produced, and the subset the model

@@ -19,8 +19,8 @@ from services.core import db, invitations
 from shared.contracts.models import Patient, QueuedInterview
 
 #: What the demo dispatches. The warm-up by default because it is one question
-#: and proves the machinery in thirty seconds; `proto_preop_check_v1` is the
-#: real thing — two sections, five authored fields, all four red-flag actions. A knob
+#: and proves the machinery in thirty seconds; `proto_preop_check_v2` is the
+#: real thing — two sections, five authored fields, flags at all three levels. A knob
 #: rather than a constant only until Phase 5, where the protocol is a column on
 #: the interview a clinician queued and this line goes away.
 DEMO_PROTOCOL_ID = os.environ.get("DEMO_PROTOCOL_ID", "proto_warmup_v1")

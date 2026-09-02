@@ -165,10 +165,10 @@ async def test_urgency_ranks_a_triage_red_by_its_flag_and_not_its_ending(live_db
     ordering the same call by two different facts.
     """
     triage = await a_row(
-        live_db, "u_triage", protocol_id="proto_preop_check_v1", minutes_ago=900
+        live_db, "u_triage", protocol_id="proto_preop_check_v2", minutes_ago=900
     )
     await a_red_flag_on(
-        live_db, triage, hit="rf_anticoagulant_taken", action="urgent_escalate"
+        live_db, triage, hit="surgical_site_change", action="urgent_escalate"
     )
     abandoned = await a_row(
         live_db, "u_triage_left", status="abandoned", outcome="patient_left", minutes_ago=300
@@ -190,10 +190,10 @@ async def test_urgency_keeps_a_red_up_the_table_once_it_is_acknowledged(live_db)
     from the person who claimed it.
     """
     taken = await a_row(
-        live_db, "u_taken", protocol_id="proto_preop_check_v1", minutes_ago=900
+        live_db, "u_taken", protocol_id="proto_preop_check_v2", minutes_ago=900
     )
     await a_red_flag_on(
-        live_db, taken, hit="rf_anticoagulant_taken", action="urgent_escalate"
+        live_db, taken, hit="surgical_site_change", action="urgent_escalate"
     )
     await live_db.execute(
         "update clinical.interviews set acknowledged_at = now(), acknowledged_by = $2 "
@@ -308,10 +308,10 @@ async def test_a_wildcard_typed_into_the_box_is_a_character(live_db):
 
 async def test_the_protocol_filter_selects_by_id(live_db):
     warm = await a_row(live_db, "flt_warm", protocol_id="proto_warmup_v1")
-    preop = await a_row(live_db, "flt_preop", protocol_id="proto_preop_check_v1")
+    preop = await a_row(live_db, "flt_preop", protocol_id="proto_preop_check_v2")
     made = {warm, preop}
 
-    page = await reads.interviews(user(), protocol_id="proto_preop_check_v1", limit=500)
+    page = await reads.interviews(user(), protocol_id="proto_preop_check_v2", limit=500)
 
     assert mine(page, made) == [preop]
 
@@ -319,7 +319,7 @@ async def test_the_protocol_filter_selects_by_id(live_db):
 async def test_search_and_filter_compose(live_db):
     keep = await a_row(live_db, "cmp_1", first_name="Composable", protocol_id="proto_warmup_v1")
     drop = await a_row(
-        live_db, "cmp_2", first_name="Composable", protocol_id="proto_preop_check_v1"
+        live_db, "cmp_2", first_name="Composable", protocol_id="proto_preop_check_v2"
     )
     made = {keep, drop}
 

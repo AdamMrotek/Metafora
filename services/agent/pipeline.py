@@ -5,19 +5,30 @@ chunking, synthesise-ahead playback, SSE parsing and WAV handling. All of that
 is framework default now. What is left here is the ordering — and the ordering
 is the architecture:
 
-    transport.input  →  vad  →  stt  →  SAFETY GATE  →  turn  →  user context  →  llm
-                                                                                     ↓
-    transport.output  ←──  tts (trimmed, Orpheus-capped)  ←──────────────────────────┘
+    transport.input → vad → stt → SAFETY GATE → turn → context → llm (tools)
+                                                                        ↓
+                                                                  NEXT MESSAGE
+                                                                        ↓
+    transport.output ←── tts (trimmed, Orpheus-capped) ←── ending ←──────┘
 
 The transcript passes through our code before it reaches the model, so the gate
 cannot be bypassed. Everything the assistant says leaves from the same process,
 so the session log is a first-hand record rather than a reconstruction of
 whatever the browser chose to relay.
 
-`vad` and `turn` sit above the split for the same reason the gate does: there is
-one patient, so there is one turn. Below the split each branch would decide the
-turn for itself, and two branches deciding separately is two answers to a
-question that has one.
+One model, holding the tools, answering *through* them. gpt-oss emits speech or
+a tool call and never both, which this used to answer by splitting the turn
+across two passes running side by side — one that spoke and held no tools, one
+that held the tools and was never heard. The split bought an immediate first
+sentence and cost the thing a clinical interview cannot afford: the two could
+not see each other. On the closing question one of them recorded the last field
+and ended the call while the other asked the patient what they wanted to say.
+
+So the sentence rides in the tool call instead. `update_intake` carries a
+required `message_next`, and `next_message.py` releases it into the speech path
+once `dispatch` has written the record and ruled on it. The record and the reply
+are one decision, made once, in that order. See `next_message.py` for what it
+costs — first-token latency, paid on every recorded turn.
 """
 
 from dataclasses import dataclass
@@ -25,7 +36,6 @@ from dataclasses import dataclass
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -44,13 +54,13 @@ from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from pipecat.turns.user_turn_processor import UserTurnProcessor
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
-from services.agent.capture import SilentBranch
 from services.agent.config import tuning
 from services.agent.end_call import EndOfInterview
 from services.agent.gate import SafetyGate
 from services.agent.machine import InterviewMachine
+from services.agent.next_message import NextMessage
 from services.agent.observer import SessionLogObserver
-from services.agent.prompts import capture_prompt, system_prompt
+from services.agent.prompts import system_prompt
 from services.agent.session_log import SessionWriter
 from services.agent.tools import dispatch
 from services.agent.tts import TrimmedGroqTTSService
@@ -60,7 +70,7 @@ from shared.contracts.models import ProtocolVersion, QueuedInterview
 
 
 def endpointing_vad() -> SileroVADAnalyzer:
-    """Speech detection, for the single `VADProcessor` above the split.
+    """Speech detection, for the pipeline's single `VADProcessor`.
 
     Note that this no longer decides when a turn *ends*. In Pipecat 1.7 the
     user-turn *stop* decision belongs to the turn strategy —
@@ -84,18 +94,16 @@ def endpointing_vad() -> SileroVADAnalyzer:
 
 
 def told_the_turn() -> LLMUserAggregatorParams:
-    """User-aggregator params for a branch that is *told* when the turn ended.
+    """User-aggregator params for a context that is *told* when the turn ended.
 
-    Left to its defaults an aggregator decides the turn itself, which means a
-    `SileroVADAnalyzer` and a `LocalSmartTurnAnalyzerV3` per aggregator — and we
-    have two. `ExternalUserTurnStrategies` makes it wait to be told instead: it
-    detects nothing, emits no `UserStartedSpeakingFrame`, and raises no
-    interruption. `UserTurnProcessor` upstream does all three, once.
-
-    A fresh instance per aggregator, because a strategy holds the state of the
-    turn its own context is accumulating and the two contexts flush
-    independently. It is the *decision* that must not be duplicated, and that
-    now happens above the split.
+    Left to its defaults the aggregator decides the turn itself, which means a
+    `SileroVADAnalyzer` and a `LocalSmartTurnAnalyzerV3` of its own, on top of
+    the ones `UserTurnProcessor` already runs: two ONNX sessions scoring every
+    frame of the patient's audio, two end-of-turn verdicts that nothing
+    reconciles, and two `InterruptionFrame`s per barge-in.
+    `ExternalUserTurnStrategies` makes it wait to be told instead — it detects
+    nothing, emits no `UserStartedSpeakingFrame`, and raises no interruption.
+    The turn belongs to the patient, and it is decided once, upstream.
     """
     return LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies())
 
@@ -144,8 +152,7 @@ def build_bot(
             ),
         )
 
-    speech_llm = _llm()
-    capture_llm = _llm()
+    llm = _llm()
 
     tts = TrimmedGroqTTSService(
         api_key=api_key,
@@ -161,8 +168,12 @@ def build_bot(
 
     # Constructed here rather than inline in the pipeline below, because the
     # tool handler needs a handle on it: a question flag that stops the call is
-    # decided in this branch and can only be *spoken* from the main path.
+    # decided on the function-call task and can only be *spoken* from this one.
     ending = EndOfInterview(machine, writer, wire)
+
+    #: One re-run per patient turn, and only after a *refused* call. See the
+    #: `run_llm` argument below.
+    retried_at_turn = -1
 
     async def _on_update_intake(params: FunctionCallParams) -> None:
         # The permission matrix runs in-process before anything is captured;
@@ -173,24 +184,34 @@ def build_bot(
             wire=wire,
             tool_name=params.function_name,
             arguments=params.arguments,
-            # Every authorised capture, not only the ones that raise something:
-            # the reply held for a question that can stop the call is waiting on
-            # this, and a reply held for a concern that never came is a reply
-            # nobody hears.
             on_concern=ending.answered,
         )
-        # `run_llm=False` is the whole reason this pass stays honest. Pipecat
-        # defaults a tool result to True — the aggregator re-runs inference so a
-        # model can say something about what its call returned. This pass has
-        # nothing to say: `SilentBranch` discards its prose, and the patient
-        # hears the speech pass. What the re-run does instead is see a context
-        # it has already answered, notice the question has moved on, and record
-        # the previous turn against the next field — or, with nothing left to
-        # reuse, invent one. On `iv_eca23eefda25` it did both, and the invented
-        # answer to the closing question completed the interview and hung up on
-        # a patient who had not been given the chance to answer it.
+        # Pipecat defaults a tool result to `run_llm=True`: the aggregator
+        # re-runs inference so a model can say something about what its call
+        # returned. On a clean capture that is exactly wrong here — the model
+        # has already said what it had to say, in `message_next`, and a re-run
+        # sees a context it has answered, notices the question has moved on, and
+        # records the previous turn against the next field, or invents one. On
+        # `iv_eca23eefda25` it did both, and the invented answer to the closing
+        # question completed the interview and hung up on a patient who had not
+        # been given the chance to answer it.
+        #
+        # A *refused* call is the exception, and it is the only thing standing
+        # between a refusal and a silent line: the sentence the patient hears is
+        # an argument of the call, so a call the matrix turns down is a turn
+        # with nothing recorded and nothing said. `next_message.py` withholds
+        # that sentence — it was written for a question the machine never moved
+        # past — and this gives the model one, and exactly one, chance per turn
+        # to see the error and answer again. The bound is what keeps it from
+        # becoming a loop: a second refusal on the same turn is simply logged.
+        nonlocal retried_at_turn
+        run_llm = False
+        if not result.get("ok") and retried_at_turn != machine.turns:
+            retried_at_turn = machine.turns
+            run_llm = True
+
         await params.result_callback(
-            result, properties=FunctionCallResultProperties(run_llm=False)
+            result, properties=FunctionCallResultProperties(run_llm=run_llm)
         )
 
     # The tool table, compiled from the protocol: the model can only call what
@@ -207,45 +228,26 @@ def build_bot(
         for definition in machine.tool_definitions()
     ]
 
-    # ── two passes, run at the same time ──
-    #
-    # The speech pass carries NO tools. That is not an oversight: gpt-oss emits
-    # speech or a tool call and never both, so a pass holding the schema is a
-    # pass that goes silent on exactly the turn the patient just answered.
-    # Telling a tool-less pass to "call update_intake" is worse still — it can
-    # only obey by reading the call out loud, and it did, to a patient.
-    #
-    # The two share the conversation but not their instructions, because only
-    # one of them holds the tools.
-    speech_context = LLMContext(
-        messages=[{"role": "system", "content": system_prompt(protocol, interview)}]
-    )
-    speech_user, speech_assistant = LLMContextAggregatorPair(
-        speech_context, user_params=told_the_turn()
-    )
-
-    capture_context = LLMContext(
-        messages=[{"role": "system", "content": capture_prompt(protocol)}],
+    # One context, holding the tools *and* the voice instructions — the two
+    # things the old `system_prompt`/`capture_prompt` split existed to keep
+    # apart. They are safe together because this pass is not heard: only
+    # `message_next` is, lifted out of the arguments downstream, so the syntax
+    # the split was protecting the patient from has nowhere to leak to.
+    context = LLMContext(
+        messages=[{"role": "system", "content": system_prompt(protocol, interview)}],
         tools=tools,
     )
-    capture_user, capture_assistant = LLMContextAggregatorPair(
-        capture_context, user_params=told_the_turn()
-    )
+    user, assistant = LLMContextAggregatorPair(context, user_params=told_the_turn())
 
-    # ── one turn, decided once, above the split ──
+    # ── one turn, decided once ──
     #
     # `TransportParams` carries no VAD in 1.7, so speech detection and turn
-    # detection are processors now. Placed inside the aggregators — where the
-    # defaults put them — this is two `SileroVADAnalyzer`s and two
-    # `LocalSmartTurnAnalyzerV3`s: two ONNX sessions scoring every frame of the
-    # patient's audio, reaching two end-of-turn verdicts that nothing
-    # reconciles, and broadcasting two `InterruptionFrame`s per barge-in. The
-    # turn belongs to the patient, not to whichever branch noticed it.
-    #
-    # `UserTurnProcessor` keeps Pipecat's defaults — VAD and transcription for
-    # the start, `LocalSmartTurnAnalyzerV3` for the stop — so the behaviour is
-    # the one `tuning.py` describes and `EndpointDecision` is measuring. What
-    # changes is that there is now one of it.
+    # detection are processors now. Left inside the aggregator — where the
+    # defaults put them — they duplicate what these two already do; see
+    # `told_the_turn`. `UserTurnProcessor` keeps Pipecat's defaults: VAD and
+    # transcription for the start, `LocalSmartTurnAnalyzerV3` for the stop, so
+    # the behaviour is the one `tuning.py` describes and `EndpointDecision` is
+    # measuring.
     vad = VADProcessor(vad_analyzer=endpointing_vad())
     turn = UserTurnProcessor()
 
@@ -256,34 +258,25 @@ def build_bot(
             # decision the patient pays for in real time.
             vad,
             stt,
-            # Before either context, before either model. This is the ordering
-            # the whole in-the-media-path argument buys.
+            # Before the context, before the model. This is the ordering the
+            # whole in-the-media-path argument buys.
             SafetyGate(protocol, writer, on_blocked=on_blocked, on_turn=machine.note_turn),
             # After the gate, so a blocked transcript never ends a turn and so
-            # never reaches a model. `broadcast_frame` pushes the turn frames
-            # downstream into the `ParallelPipeline`, which forks them to both
-            # branches — that is how one decision reaches two contexts.
+            # never reaches the model.
             turn,
-            ParallelPipeline(
-                # Heard. Streams the first sentence while the other branch is
-                # still deciding what to record. Note the assistant aggregator
-                # is NOT in here: it consumes the LLM's text frames to build
-                # context, so inside the branch it swallows the reply and the
-                # TTS downstream never sees a word. It belongs at the end of
-                # the pipeline, after the audio has been published.
-                [speech_user, speech_llm],
-                # Never heard. Writes the record. Its aggregator *does* live in
-                # the branch, because the tool result has to get back into this
-                # context, and everything after it is discarded anyway.
-                [capture_user, capture_llm, capture_assistant, SilentBranch()],
-            ),
-            # Between the models and the TTS: it sees the response frames and
+            user,
+            llm,
+            # Lifts `message_next` out of the tool call's arguments and pushes
+            # it as an ordinary response — after `dispatch` has written the
+            # record and ruled on it, which is the whole ordering.
+            NextMessage(),
+            # Between the model and the TTS: it sees the response frames and
             # hangs up after the last answer has been spoken — or after the
             # sentence a blocking concern left it to say.
             ending,
             tts,
             transport.output(),
-            speech_assistant,
+            assistant,
         ]
     )
 
@@ -297,10 +290,7 @@ def build_bot(
         # channel the browser is reading, which the client would have to parse
         # and discard.
         enable_rtvi=False,
-        observers=[
-            WireObserver(wire, speech_llm=speech_llm),
-            SessionLogObserver(writer, speech_llm=speech_llm),
-        ],
+        observers=[WireObserver(wire), SessionLogObserver(writer)],
         # The bot's only handle on storage, closed over one patient (§8).
         app_resources=writer,
     )

@@ -54,6 +54,10 @@ class InterviewMachine:
         self._turns = 0
         self._captured_at_turn = 0
 
+        # Questions a thin answer has been pushed back on, and the turn it
+        # happened on. See `press`.
+        self._pressed: dict[str, int] = {}
+
     @property
     def current(self) -> CompiledState | None:
         return self.states[self._index] if self._index < len(self.states) else None
@@ -61,6 +65,12 @@ class InterviewMachine:
     @property
     def complete(self) -> bool:
         return self._index >= len(self.states)
+
+    @property
+    def turns(self) -> int:
+        """Committed patient turns so far. The single-pass handler bounds its
+        one re-run per turn against this."""
+        return self._turns
 
     def note_turn(self) -> None:
         """A committed patient turn, counted once, before either model sees it.
@@ -83,11 +93,11 @@ class InterviewMachine:
         call the model cannot route around.
 
         The turn condition is not a second guess at the model's judgement, it is
-        the one thing the model cannot check for itself: a capture pass re-run on
-        a context it has already answered has no new utterance to draw on, and it
-        will either record the previous turn against the next field or invent
-        one. Both happened on `iv_eca23eefda25`, and the invented one walked the
-        machine into `complete` and hung up on a patient mid-question. A field is
+        the one thing the model cannot check for itself: a re-run on a context it
+        has already answered has no new utterance to draw on, and it will either
+        record the previous turn against the next field or invent one. Both
+        happened on `iv_eca23eefda25`, and the invented one walked the machine
+        into `complete` and hung up on a patient mid-question. A field is
         something the patient said; if they have not spoken since the last thing
         recorded, there is nothing to record.
         """
@@ -104,10 +114,68 @@ class InterviewMachine:
             return ToolAuthorisation(False, "no patient turn since the last capture")
         return ToolAuthorisation(True)
 
+    def press(self, field_key: str) -> bool:
+        """Whether a thin answer to this question is still worth pushing back on.
+
+        True the first time, and again for any re-try on the same turn; False
+        once the patient has answered again. That is the rule the script
+        already authors in prose. `anything_else` says *accept whatever they
+        say, including nothing*; `health_change` says *one follow-up, then
+        record what they said in their words*. Both mean: ask twice, take the
+        second answer whatever it is.
+
+        The bound is not politeness, it is the reason a refusal cannot hang the
+        call. A patient who answers "yeah" twice has been asked twice and is
+        recorded as having said "yeah" — the interview moves on rather than
+        standing at a question waiting for a better answer that is not coming.
+        """
+        pressed_at = self._pressed.get(field_key)
+        if pressed_at is None:
+            self._pressed[field_key] = self._turns
+            return True
+        # Pushed back already — but the bound is one *patient turn*, not one
+        # call. A model that answers a refusal by re-sending the same word has
+        # not asked anybody anything, and spending the allowance on it would
+        # record the thin answer without the patient ever hearing the question
+        # a second time. Accept only once they have actually spoken again.
+        return self._turns <= pressed_at
+
+    def position(self, field_key: str) -> int | None:
+        """Where in the script the question recording `field_key` sits, or None
+        if this protocol does not declare it.
+
+        `dispatch` compares it against the cursor, and the comparison is why it
+        exists. The permission matrix constrains the state a call is made from,
+        not the key it names, so until this existed a model could answer any
+        question in the script from any point in it. `iv_44d21cb7269d` is what
+        that costs: on the first turn, asked how her day was going, the patient
+        said she had not fasted, and it was filed under `anything_else` — the
+        *closing* question, four turns away. The write was authorised, so the
+        field was full before the question was asked.
+
+        Nothing then advanced the interview past `close.q1`. `_advance` moves on
+        a capture, the model had nothing left to capture, and `complete` is what
+        `EndOfInterview` hangs up on — so the assistant said goodbye and went on
+        listening until the patient gave up and left. A question that answers
+        itself before it is asked also disarms the ending.
+
+        Fields already behind the cursor stay writable: a patient correcting an
+        earlier answer is recording the question that was asked, late. It is
+        only the ones ahead that are answers to questions nobody has put.
+        """
+        for i, state in enumerate(self.states):
+            if state.question.field_key == field_key:
+                return i
+        return None
+
+    @property
+    def index(self) -> int:
+        """The cursor: which question is live. Compared against `position`."""
+        return self._index
+
     def capture(self, field_key: str, value: str) -> bool:
         """Write a captured value, if the key is one this protocol declares."""
-        known = any(s.question.field_key == field_key for s in self.states)
-        if not known:
+        if self.position(field_key) is None:
             return False
         self._values[field_key] = value
         self._captured_at_turn = self._turns
@@ -172,8 +240,12 @@ class InterviewMachine:
 
         Both of those arguments appear **only when the protocol authored the
         thing they are about**. A script with no enum captures and no question
-        flags compiles to exactly the schema it always did, so nothing is asked
-        of a model that has nothing to answer with.
+        flags compiles to `field`, `value` and `message_next` and nothing else,
+        so nothing is asked of a model that has nothing to answer with.
+
+        `message_next` is on every schema, because it is the whole shape of the
+        turn: what the patient hears is an argument of the call that records
+        what they just said. See `next_message.py`.
         """
         properties: dict[str, dict] = {
             "field": {
@@ -219,6 +291,24 @@ class InterviewMachine:
                 ),
             }
             required.append("flag")
+
+        # Required, and last, so the model writes the sentence *after* it has
+        # settled what it is recording. The two arrive together: what the
+        # patient hears next is a property of the answer just given, and the
+        # failure this removes is what happened when they were decided by two
+        # models that could not see each other — the record closing the
+        # interview while the speech asked the next question.
+        properties["message_next"] = {
+            "type": "string",
+            "description": (
+                "What to say to the patient out loud, immediately after this. "
+                "One or two short spoken sentences: acknowledge what they just "
+                "said, then ask the next question. Their words, not a summary "
+                "of the record. Say nothing about this call, the fields, or "
+                "anything you were asked to judge."
+            ),
+        }
+        required.append("message_next")
 
         return [
             {

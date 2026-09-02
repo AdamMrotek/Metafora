@@ -13,6 +13,14 @@ shows the attempt as well as the outcome:
   · a call with no patient turn behind it — nothing was said, so there is
     nothing to record, whatever the model has found to put in the field
   · a field key the protocol never declared
+  · a field the interview has not reached — an answer to a question nobody has
+    asked yet. The matrix constrains the state a call is made from, not the key
+    it names, and on `iv_44d21cb7269d` a first-turn remark about fasting was
+    filed under the *closing* question. That question then had nothing left to
+    record, so nothing advanced the machine past it, so `complete` never came
+    true and the call never hung up. See `machine.position`.
+  · a bare *yes* to a question that `expects_content`. Refused once, and then
+    only once — see `_is_thin`.
 
 Every one of them still returns a result to the model. A dangling tool call
 corrupts the next turn's context, and the model is entitled to see what its call
@@ -50,11 +58,10 @@ async def dispatch(
 ) -> dict[str, Any]:
     """Record one field, then work out what the answer raised.
 
-    `on_concern` is how the verdict gets out of here, and it is called on every
-    authorised capture rather than only the ones that raise something. This runs
-    inside the capture branch of the `ParallelPipeline` and cannot push a frame
-    of its own — the speech pass is answering the same turn beside it. See
-    `EndOfInterview.answered`.
+    `on_concern` is how the verdict gets out of here. This runs on the LLM
+    service's function-call task and cannot push a frame of its own, so a
+    concern that stops the call is handed to `EndOfInterview.answered`, which
+    queues the decision onto the pipeline's own task.
     """
     args = _coerce(arguments)
     if args is None:
@@ -88,6 +95,27 @@ async def dispatch(
         )
         return {"ok": False, "error": "field and value must both be strings"}
 
+    # Before the write, and separately from it, so the two refusals say
+    # different things to the model: one is a key that does not exist, the
+    # other is a real key it is too early for. The second is the one that
+    # matters — a patient who volunteers the next answer has it refused here
+    # and recorded when the question is actually put, which costs them saying
+    # it twice; the alternative costs the interview its ending.
+    at = machine.position(field)
+    if at is not None and at > machine.index:
+        reason = "field is ahead of the question being asked"
+        writer.append(
+            ToolCalled(name=tool_name, args=args, authorised=False, reason=reason)
+        )
+        return {"ok": False, "error": reason}
+
+    thin = _is_thin(machine, field, value)
+    if thin is not None:
+        writer.append(
+            ToolCalled(name=tool_name, args=args, authorised=False, reason=thin)
+        )
+        return {"ok": False, "error": thin}
+
     if not machine.capture(field, value):
         writer.append(
             ToolCalled(
@@ -115,6 +143,64 @@ async def dispatch(
 
     _advance(machine, writer)
     return {"ok": True, "recorded": field}
+
+
+#: Answers that say the patient has something to tell you without telling you
+#: it. Matched **whole**, after normalisation, and deliberately never as a
+#: prefix: "yes, there's redness around the wound" is an answer and has to land.
+#: Everything here is a word a patient uses to hold the floor, not to fill it.
+AFFIRMATIONS = frozenset(
+    {
+        "yes", "yeah", "yeh", "yep", "yup", "yes there is", "yes i do",
+        "yes please", "yes i have", "there is", "i do", "i have",
+        "sure", "ok", "okay", "right", "mhm", "mm", "mmhm", "uh huh", "aye",
+        "correct", "that's right", "thats right", "true", "definitely",
+        "absolutely", "of course",
+    }
+)
+
+_PUNCTUATION = str.maketrans("", "", ".,!?;:'\"")
+
+
+def _normalise(value: str) -> str:
+    return " ".join(value.lower().translate(_PUNCTUATION).split())
+
+
+def _is_thin(machine: InterviewMachine, field: str, value: str) -> str | None:
+    """The refusal reason for an answer that is only an acknowledgement, or None.
+
+    Some questions read as yes/no and ask for content — the closing one above
+    all, which is grammatically answerable with *yes* and is in fact the
+    patient's one open turn. A model reading it literally records exactly that.
+    On `iv_53ff71f5e583` it recorded `anything_else = "Yes"`, which completed
+    the interview and hung up on a patient who had just said she had something
+    to raise. The record read "Yes" and the thing she wanted to say is not in
+    it, or anywhere.
+
+    Which question those are is the author's to declare, not ours to infer:
+    `Question.expects_content`. Two bounds keep this from becoming a model of
+    its own — it fires only on an exact whole-string match, so any answer with a
+    fact in it passes untouched, and only once per question (`machine.press`),
+    so a patient who says "yeah" twice is recorded as having said it rather than
+    asked a third time.
+
+    The reason string is written to be read by the model, because in the
+    single-pass pipeline it is: a refused call re-runs inference once, and this
+    sentence is what the next turn is answering.
+    """
+    state = machine.current
+    if state is None or state.question.field_key != field:
+        return None
+    if not state.question.expects_content:
+        return None
+    if _normalise(value) not in AFFIRMATIONS:
+        return None
+    if not machine.press(field):
+        return None
+    return (
+        "the patient has said there is something, but not what it is — "
+        "ask them, and record what they say"
+    )
 
 
 async def _raise_concerns(
@@ -162,10 +248,8 @@ async def _raise_concerns(
         )
     )
 
-    # On every authorised capture, whatever it raised. `EndOfInterview` holds
-    # the assistant's reply on a question that can stop the call, and this is
-    # what tells it the answer is in — a hold released only by a concern would
-    # never be released by a clean answer.
+    # On every authorised capture, whatever it raised: `EndOfInterview` is what
+    # stops the call, and it is reached from here.
     if on_concern is not None:
         await on_concern(result)
 

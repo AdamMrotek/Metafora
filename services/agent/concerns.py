@@ -11,10 +11,10 @@ Two triggers, and they are not equal:
 
   · **value** — the answer resolved to one of the question's own declared
     `EnumCapture` values, and a flag was waiting for that value. A table
-    lookup. The capture pass classified into a closed enum, which is a much
-    narrower thing to ask a model than "is this concerning"; nothing here
-    depends on its opinion about the flag.
-  · **judged** — the capture pass named the flag itself, against the sentence
+    lookup. The model classified into a closed enum, which is a much narrower
+    thing to ask than "is this concerning"; nothing here depends on its
+    opinion about the flag.
+  · **judged** — the model named the flag itself, against the sentence
     the author wrote in `when`. This is the half that catches metaphor, and it
     is the half that can be wrong in both directions.
 
@@ -47,8 +47,8 @@ class ConcernResult:
     hits: list[ConcernHit] = field(default_factory=list)
     #: True when the worst hit stops the call.
     blocked: bool = False
-    #: Set when `blocked` — the authored sentence, spoken instead of whatever
-    #: the speech pass was about to say next.
+    #: Set when `blocked` — the authored sentence, spoken instead of the
+    #: `message_next` the model wrote for a call that is carrying on.
     say: str | None = None
     action: RedFlagAction | None = None
 
@@ -59,7 +59,7 @@ class ConcernResult:
 def resolve(question: Question, *, answer: str | None, named: str | None) -> ConcernResult:
     """What this answer raises, if anything.
 
-    `answer` is the enum member the capture pass classified into, or None for a
+    `answer` is the enum member the model classified into, or None for a
     question that declares no enum. `named` is the flag id it proposed, already
     checked against what this question declares.
     """

@@ -2,8 +2,8 @@
 
 `test_safety.py` proves every flag fires on its own utterance; this proves the
 *set* is coherent — that each flag is at a level, that a level the protocol
-claims is a level something can raise, and that publishing v2 left v1 exactly
-where it was.
+claims is a level something can raise, and that the questions which can cut a
+call short are the ones the catalog says they are, each with a sentence.
 """
 
 from typing import get_args
@@ -12,7 +12,6 @@ import pytest
 
 from services.agent.config.protocol import (
     OFFERED,
-    PREOP_CHECK_V1,
     PREOP_CHECK_V2,
     PREOP_SHORT_V2,
     PROTOCOLS,
@@ -59,9 +58,10 @@ def test_nothing_is_authored_at_a_level_that_is_not_a_level(protocol):
 
 
 def test_note_only_survives_in_the_contract():
-    """Not authored and deleted are different acts, and this is the first.
-    Interviews filed under v1 carry `note_only` hits, and a contract that drops
-    a value the record contains cannot read its own history."""
+    """Not authored and deleted are different acts, and this is the first. A
+    record written while `note_only` was still authored carries hits at that
+    level, and a contract that drops a value the record contains cannot read its
+    own history."""
     assert "note_only" in get_args(RedFlagAction)
 
 
@@ -134,32 +134,6 @@ def test_the_anxiety_flag_is_gone_and_nothing_replaced_it():
     assert scan("I'm a bit nervous about the anaesthetic", PREOP_CHECK_V2).hits == []
 
 
-# ─── and v1 did not move ─────────────────────────────────────────────────────
-
-
-def test_publishing_v2_left_v1_exactly_where_it_was():
-    """Every hit already in `transcript.events` resolves against the version its
-    interview pinned. If v1's actions move, so does the meaning of a call filed
-    months ago — which is the whole reason this was a new id and not an edit."""
-    by_id = {f.id: f for f in PREOP_CHECK_V1.red_flags}
-    assert by_id["rf_fitness_change"].action == "urgent_escalate"
-    assert by_id["rf_anticoagulant_taken"].action == "urgent_escalate"
-    assert by_id["nf_anxiety"].action == "note_only"
-
-
-def test_the_flags_that_moved_kept_their_ids_labels_and_patterns():
-    """Only the action moved. An id is an opaque key the record has already
-    filed, and the level is the action — never the `rf_` prefix, which is left
-    over from an older vocabulary."""
-    v1 = {f.id: f for f in PREOP_CHECK_V1.red_flags}
-    v2 = {f.id: f for f in PREOP_CHECK_V2.red_flags}
-
-    for flag_id in ("rf_fitness_change", "rf_anticoagulant_taken"):
-        assert v2[flag_id].label == v1[flag_id].label
-        assert v2[flag_id].patterns == v1[flag_id].patterns
-        assert v2[flag_id].action != v1[flag_id].action
-
-
 # ─── the flags that hang off a question ──────────────────────────────────────
 
 
@@ -183,7 +157,8 @@ def test_a_flag_id_is_unique_across_both_lists(protocol):
 @published
 def test_only_a_question_flag_that_stops_the_call_speaks(protocol):
     """The same mechanical rule as `test_only_a_flag_that_stops_the_call_speaks`.
-    A sentence on any other action races the speech pass into the same TTS."""
+    A sentence on any other action races the model's own reply into the same
+    TTS."""
     for _, flag in question_flags(protocol):
         if flag.action != "end_call":
             assert flag.say is None, f"{flag.id} does not stop the call but speaks"
@@ -251,41 +226,78 @@ def test_the_preop_questions_raise_at_three_levels():
     assert {f.action for _, f in question_flags(PREOP_CHECK_V2)} == set(TYPES)
 
 
-def test_the_only_question_that_stops_the_call_is_the_one_about_coming():
-    """Everything else on this script is a thing to write down. An answer that
+# ─── what can end a call ─────────────────────────────────────────────────────
+
+#: The table in `protocol.py`'s docstring, as an assertion. Per protocol: the
+#: gate flags that stop a call, then the field keys whose answer can. Written
+#: out rather than derived, because the point is that adding a way to hang up on
+#: a patient is a decision somebody makes on purpose and not a side effect of
+#: authoring a flag.
+ENDINGS = {
+    "proto_warmup_v1": (["rf_self_harm"], []),
+    "proto_preop_check_v2": (
+        ["rf_self_harm"],
+        ["attendance", "anything_else"],
+    ),
+    "proto_preop_short_v2": (
+        ["rf_self_harm"],
+        ["attendance", "anything_else"],
+    ),
+}
+
+
+@published
+def test_the_catalog_names_every_way_a_call_can_be_cut_short(protocol):
+    """There is no hangup tool: a call ends because every field is captured, or
+    because a flag authored at `end_call` stopped it. This is the second set, and
+    it is small on purpose — carrying on asking has to be worse than stopping
+    before a question earns the right to end the interview."""
+    gate, fields = ENDINGS[protocol.id]
+
+    assert [f.id for f in protocol.red_flags if f.action == "end_call"] == gate
+    assert [
+        q.field_key for q in questions(protocol) if any(f.action == "end_call" for f in q.flags)
+    ] == fields
+
+
+@published
+def test_every_ending_says_something_before_it_hangs_up(protocol):
+    """`say` is not decoration. `next_message.speakable` withholds whatever the
+    model wrote the moment a capture comes back ending, so a flag with no
+    sentence of its own drops the line in silence."""
+    for flag in protocol.red_flags:
+        if flag.action == "end_call":
+            assert flag.say, f"{flag.id} stops the call and says nothing"
+    for _, flag in question_flags(protocol):
+        if flag.action == "end_call":
+            assert flag.say, f"{flag.id} stops the call and says nothing"
+
+
+def test_the_only_question_mid_script_that_stops_the_call_is_the_one_about_coming():
+    """Everything else the unit authored is a thing to write down. An answer that
     means the operation is not happening is the one case where carrying on
-    asking is worse than stopping."""
-    stopping = [f.id for _, f in question_flags(PREOP_CHECK_V2) if f.action == "end_call"]
+    asking is worse than stopping — and the closing question is not mid-script:
+    it ends the interview either way, and the flag only decides whose sentence
+    the patient hears on the way out."""
+    stopping = [
+        f.id
+        for q, f in question_flags(PREOP_CHECK_V2)
+        if f.action == "end_call" and q.field_key != "anything_else"
+    ]
     assert stopping == ["qf_attendance_cannot"]
 
 
-def test_the_closing_question_carries_no_flag():
-    """`CLOSING` is shared by every protocol and authored by none of them. What
-    a patient raises on their own turn is not an answer to a question, so there
-    is nothing for a question flag to hang off — the gate watches that turn."""
-    for protocol in PROTOCOLS.values():
-        assert questions(protocol)[-1].field_key == "anything_else"
-        assert questions(protocol)[-1].flags == []
-
-
-# ─── and v1's script did not move either ─────────────────────────────────────
-
-
-def test_v1_questions_carry_no_flags():
-    """A question flag changes what a version does. v1 is what interviews
-    already filed are read back against, so it does not grow one."""
-    assert all(q.flags == [] for q in questions(PREOP_CHECK_V1))
-
-
-def test_v2_changed_nothing_about_a_question_except_what_it_can_raise():
-    """v2's script is written out rather than derived, so this is the guard
-    against a typo silently minting a new field key or a different capture."""
-    v1 = questions(PREOP_CHECK_V1)
-    v2 = questions(PREOP_CHECK_V2)
-    assert len(v1) == len(v2)
-
-    for a, b in zip(v1, v2, strict=True):
-        assert b.model_dump(exclude={"flags"}) == a.model_dump(exclude={"flags"})
+@published
+def test_the_closing_question_is_the_last_one_and_is_never_must_capture(protocol):
+    """Every script ends by asking the patient what they want to raise, and
+    nobody is owed an answer to it. It carries a flag now — leaving that turn to
+    the gate meant a symptom said in the patient's own words matched no pattern
+    and reached no clinician — but it is still their turn and not a field the
+    interview can stall on."""
+    last = questions(protocol)[-1]
+    assert last.field_key == "anything_else"
+    assert last.must_capture is False
+    assert last.expects_content is True
 
 
 # ─── offered is not published ────────────────────────────────────────────────
@@ -296,8 +308,12 @@ def test_every_offered_protocol_is_published():
 
 
 def test_a_superseded_version_stays_in_the_catalog_and_off_the_composer():
-    """Both halves. Dropping it from `PROTOCOLS` would break the interviews
-    pinned to it; leaving it in `OFFERED` would let a clinician queue a new call
-    against a version that has been replaced."""
-    assert PREOP_CHECK_V1.id in PROTOCOLS
-    assert PREOP_CHECK_V1.id not in OFFERED
+    """Both halves, for whenever there is a superseded version again. Dropping
+    one from `PROTOCOLS` breaks the interviews pinned to it; leaving it in
+    `OFFERED` lets a clinician queue a new call against a version that has been
+    replaced. Nothing is superseded today, so this asserts the shape rather than
+    a member — see `test_dispatch.test_a_superseded_protocol_cannot_be_dispatched`
+    for the behaviour it protects."""
+    for protocol_id in PROTOCOLS:
+        if protocol_id not in OFFERED:
+            assert PROTOCOLS[protocol_id].frozen

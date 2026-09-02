@@ -3,7 +3,7 @@
 `WARMUP_V1` has one authored question and one flag, so a whole class of behaviour is
 unreachable through it: nothing crosses a section boundary, no turn hits two
 flags at once, and the only action that can fire is the one that stops the
-call. `PREOP_CHECK_V1` is the first protocol where the compile step, the
+call. `PREOP_CHECK_V2` is the first protocol where the compile step, the
 ranking in `SEVERITY` and the tool matrix have anything to do.
 
 The last three tests are characterisations of gaps the doc names, not
@@ -13,13 +13,14 @@ implementing the feature breaks them.
 
 import pytest
 
-from services.agent.config.protocol import PREOP_CHECK_V1 as PREOP
+from services.agent.config.protocol import PREOP_CHECK_V2 as PREOP
 from services.agent.machine import InterviewMachine
 from services.agent.safety import scan
 from services.agent.tools import dispatch
 
-# The last of each is `CLOSING`, which the protocol does not author and cannot
-# drop: every script ends by asking the patient what they want to raise.
+# The last of each is the closing question, which the protocol does not phrase
+# and cannot drop: every script ends by asking the patient what they want to
+# raise. What it *may* author is a flag on the answer — see `CLOSING_CONCERN`.
 STATES = ["s1.q1", "s1.q2", "s2.q1", "s2.q2", "s2.q3", "close.q1"]
 FIELDS = [
     "attendance",
@@ -114,12 +115,18 @@ def test_every_report_field_is_a_field_the_script_actually_captures():
         (
             "the GP started me on antibiotics",
             {"rf_fitness_change"},
-            "urgent_escalate",
+            "soft_review",
             False,
         ),
         (
             "I'm still taking the apixaban",
             {"rf_anticoagulant_taken"},
+            "soft_review",
+            False,
+        ),
+        (
+            "it's gone red and hot where they're operating",
+            {"surgical_site_change"},
             "urgent_escalate",
             False,
         ),
@@ -150,15 +157,18 @@ def test_only_the_self_harm_flag_stops_the_call():
 
 
 def test_a_turn_that_hits_two_flags_is_ranked_and_keeps_both_on_the_record():
-    """The doc's last turn. `SEVERITY` picks the action for the turn; the
-    note-only hit still has to survive onto the record, because it is the thing
-    that tells whoever rings back how to open the call."""
+    """`SEVERITY` picks the action for the turn; the lesser hit still has to
+    survive onto the record, because it is the thing that tells whoever rings
+    back how to open the call."""
     result = scan(
-        "I've had a chesty cough since the weekend and the GP started me on "
-        "antibiotics on Monday. I'm a bit nervous about the anaesthetic.",
+        "I've had a chesty cough since the weekend, and it's gone red and hot "
+        "where they're operating.",
         PREOP,
     )
-    assert {h.flag.id for h in result.hits} == {"rf_fitness_change", "nf_anxiety"}
+    assert {h.flag.id for h in result.hits} == {
+        "rf_fitness_change",
+        "surgical_site_change",
+    }
     assert result.action == "urgent_escalate"
     assert result.blocked is False
 
@@ -166,7 +176,7 @@ def test_a_turn_that_hits_two_flags_is_ranked_and_keeps_both_on_the_record():
 # ─── the call in the doc, end to end ─────────────────────────────────────────
 
 #: Ruth's turns: what she says, what the gate makes of it, and the field the
-#: capture pass records off the back of it. The doc's call is the first five;
+#: tool call records off the back of it. The doc's call is the first five;
 #: the sixth is the closing question every protocol ends on, and it is here
 #: because the gate runs on that turn like any other — an open turn is where a
 #: patient says the thing no question asked for.
@@ -183,16 +193,16 @@ CALL = [
     ("Yes — Sunday night was the last one.", set(), None, "meds_stopped"),
     (
         "Well, I've had a chesty cough since the weekend and the GP started me "
-        "on antibiotics on Monday. I'm a bit nervous about the anaesthetic with "
-        "all that, to be honest.",
-        {"rf_fitness_change", "nf_anxiety"},
-        "urgent_escalate",
+        "on antibiotics on Monday.",
+        {"rf_fitness_change"},
+        "soft_review",
         "health_change",
     ),
     (
-        "No, nothing else. I've been dreading the whole thing, if I'm honest.",
-        {"nf_anxiety"},
-        "note_only",
+        "No, nothing else — though it's gone a bit red and hot where they're "
+        "operating.",
+        {"surgical_site_change"},
+        "urgent_escalate",
         "anything_else",
     ),
 ]
@@ -221,7 +231,10 @@ async def test_the_call_completes_and_is_also_an_escalation():
     assert list(machine.captured) == FIELDS
     assert all(machine.captured.values())
     assert "urgent_escalate" in actions and "soft_review" in actions
-    assert actions[-1] == "note_only", "the closing turn goes through the gate too"
+    assert actions[-1] == "urgent_escalate", (
+        "the closing turn goes through the gate too — and on this call it is "
+        "where the escalation comes from, which is the argument for asking it"
+    )
 
 
 # ─── gaps this protocol is the first to reach ────────────────────────────────
@@ -244,21 +257,31 @@ async def test_an_enum_field_records_the_utterance_not_the_enum_member():
 
 
 async def test_the_field_enum_is_not_scoped_to_the_current_state():
-    """Gap: the matrix constrains the *state* a tool may be called from, not the
-    field it may write. Every key is offered from every state, so the capture
-    pass can legally record a question that has not been asked — and because
-    `_advance` only fires on the current question's field, the interview stays
-    where it was.
+    """The schema still offers every key from every state — it is compiled once,
+    before the call, and the enum's job is to close the *set*, not to track the
+    cursor. What is scoped is the write, in `dispatch`, where the state is known.
 
-    Unreachable with a one-question protocol; live from the first call of this
-    one.
+    This test used to assert the gap. It cost `iv_44d21cb7269d` its ending: a
+    first-turn remark was filed under the closing question, which therefore had
+    nothing left to record when it was finally asked, so `_advance` never fired,
+    `complete` never came true, and the assistant said goodbye to a line it then
+    kept open. `machine.reached` is the fix; this is what it looks like from
+    outside.
     """
     machine = InterviewMachine(PREOP)
+    keys = machine.tool_definitions()[0]["parameters"]["properties"]["field"]["enum"]
+    assert "health_change" in keys, "the enum is the protocol's, not the state's"
+
     result = await record(machine, "health_change", "no, nothing's changed")
 
-    assert result == {"ok": True, "recorded": "health_change"}
+    assert result == {
+        "ok": False,
+        "error": "field is ahead of the question being asked",
+    }
     assert machine.current.id == "s1.q1", "recording ahead must not advance the interview"
-    assert machine.fields()[4].status == "captured"
+    assert machine.fields()[4].status == "pending", (
+        "a question nobody has asked must not read as answered"
+    )
 
 
 def test_an_escalation_has_no_sentence_of_its_own_to_speak():
@@ -270,6 +293,6 @@ def test_an_escalation_has_no_sentence_of_its_own_to_speak():
     escalating = [f for f in PREOP.red_flags if f.action == "urgent_escalate"]
     assert escalating and all(f.say is None for f in escalating)
 
-    result = scan("the GP started me on antibiotics on Monday", PREOP)
+    result = scan("it's gone red and hot where they're operating", PREOP)
     assert result.action == "urgent_escalate"
     assert result.say is None

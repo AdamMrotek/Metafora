@@ -153,10 +153,17 @@ async def test_a_request_that_cannot_be_honoured_says_why(live_db, request_):
 async def test_a_superseded_protocol_cannot_be_dispatched(live_db):
     """It is still in the catalog, because the interviews already pinned to it
     have to run and read. That is not the same as being offerable: a new call
-    goes against the current version, and `OFFERED` is the difference."""
+    goes against the current version, and `OFFERED` is the difference.
+
+    Skipped while the two sets agree — the v1 generation was deleted rather than
+    superseded, so there is nothing to dispatch. The test stays because the next
+    published version puts a member back in the gap, and that is exactly when
+    this has to still be true."""
     from services.agent.config.protocol import OFFERED, PROTOCOLS
 
-    superseded = next(p for p in PROTOCOLS if p not in OFFERED)
+    superseded = next((p for p in PROTOCOLS if p not in OFFERED), None)
+    if superseded is None:
+        pytest.skip("every published protocol is currently offered")
 
     with pytest.raises(dispatch.Refused):
         await dispatch.create_interview(user(), to(protocol_id=superseded))

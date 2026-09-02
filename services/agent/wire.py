@@ -97,16 +97,9 @@ class WireObserver(BaseObserver):
         LLMFullResponseEndFrame,
     )
 
-    def __init__(self, wire: Wire, *, speech_llm=None) -> None:
-        """`speech_llm` is the pass the patient can hear.
-
-        An observer sees every branch of a `ParallelPipeline`. The capture pass
-        opens and closes responses of its own, and without this each one starts
-        a fresh, empty speech bubble in the browser.
-        """
+    def __init__(self, wire: Wire) -> None:
         super().__init__()
         self._wire = wire
-        self._speech_llm = speech_llm
         self._assistant_id: str | None = None
         self._assistant_text = ""
         self._seen: OrderedDict[int, None] = OrderedDict()
@@ -134,10 +127,6 @@ class WireObserver(BaseObserver):
 
     async def on_push_frame(self, data: FramePushed) -> None:
         frame = data.frame
-
-        if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
-            if self._speech_llm is not None and data.source is not self._speech_llm:
-                return
 
         if isinstance(frame, self._DEDUPED) and not self._first_sighting(frame):
             return

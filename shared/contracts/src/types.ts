@@ -47,8 +47,8 @@ export interface QuestionFlag {
   when?: string;
   action: RedFlagAction;
   /** Spoken to the patient when this stops the call, and only then. Any other */
-  /** action lets the conversation continue, which means the speech pass is */
-  /** already generating a reply — a second sentence would race it into the */
+  /** action lets the conversation continue, which means the model has already */
+  /** written the reply it says next — a second sentence would race it into the */
   /** same TTS. `test_flag_types.py` holds that line for red flags and for */
   /** these. */
   say?: string;
@@ -67,6 +67,15 @@ export interface Question {
   /** Human label for the "Notes so far" card and the review composer row. */
   label: string;
   capture: Capture;
+  /** The question reads as yes/no but asks for *content*. "Before we finish, */
+  /** is there anything else?" is grammatically answerable with "yes", and a */
+  /** model reading it literally will record exactly that — which is the */
+  /** patient saying they have something to tell you, not telling you it. On */
+  /** `iv_53ff71f5e583` that recorded `anything_else = "Yes"`, completed the */
+  /** interview and hung up on a patient who had just said she had something */
+  /** to raise. Declared here rather than inferred, because whether a question */
+  /** wants a fact or a confirmation is the author's to say. */
+  expectsContent: boolean;
   /** What to do when the answer does not resolve. Drives the follow-up budget. */
   ifUnclear?: string;
   /** A section may be skipped by policy; a question may not. */

@@ -21,14 +21,14 @@ pytestmark = pytest.mark.postgres
 ALICE = "alice@example.test"
 BOB = "bob@example.test"
 
-#: Two flags of `PREOP_CHECK_V1`, as it ships today: one red, one yellow.
-#: Named here rather than looked up so that a test failing after 5b·1 moves the
-#: flag set says *which* flag moved.
-RED = "rf_anticoagulant_taken"
+#: Two gate flags of `PREOP_CHECK_V2`, as it ships today: one urgent, one
+#: flagged. Named here rather than looked up so that a test failing after the
+#: flag set moves says *which* flag moved.
+RED = "surgical_site_change"
 YELLOW = "yf_attendance_risk"
-PROTOCOL = "proto_preop_check_v1"
+PROTOCOL = "proto_preop_check_v2"
 
-#: `PREOP_CHECK_V1.urgent.timeout_minutes`. The deadline the band draws comes
+#: `PREOP_CHECK_V2.urgent.timeout_minutes`. The deadline the band draws comes
 #: from the version the interview pinned, so this is the number it must produce.
 TIMEOUT_MINUTES = 120
 
@@ -128,7 +128,7 @@ async def test_a_red_flag_raises_a_line_naming_what_is_owed(live_db):
     assert interview_id in band
     line = band[interview_id]
     assert line.patient_first_name == "Sarah"
-    assert line.flag_label == "Anticoagulant not stopped as instructed"
+    assert line.flag_label == "New or worsening pain at the operation site"
     assert line.action == "urgent_escalate"
     assert line.due_at is not None
     assert (line.due_at - line.raised_at).total_seconds() == TIMEOUT_MINUTES * 60
@@ -158,7 +158,7 @@ async def test_the_band_names_the_red_and_not_the_yellow_beside_it(live_db):
 
     line = next(e for e in await reads.escalations(user()) if e.interview_id == interview_id)
 
-    assert line.flag_label == "Anticoagulant not stopped as instructed"
+    assert line.flag_label == "New or worsening pain at the operation site"
 
 
 async def test_another_clinicians_red_is_not_in_your_band(live_db):
@@ -249,7 +249,7 @@ async def test_acknowledging_an_interview_that_does_not_exist_is_not_found(live_
 # list. Which net caught it is on the event, for a clinician; it is not a second
 # kind of escalation for the dashboard to learn.
 
-V2 = "proto_preop_check_v2"
+V2 = PROTOCOL
 Q_URGENT = "qf_meds_still_taking"
 Q_FLAGGED = "qf_attendance_at_risk"
 Q_CRITICAL = "qf_attendance_cannot"
