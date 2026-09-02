@@ -9,7 +9,7 @@ that property, and a file split by verb would not.
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from services.agent.config.protocol import PROTOCOLS
+from services.agent.config.protocol import OFFERED
 from services.core import acknowledgements, dispatch, invitations, reads
 from services.core.db import pool
 from shared.auth import READS_THE_RECORD, ClinicalReader, require_role
@@ -109,12 +109,16 @@ async def get_interview(
 async def list_protocols(_user: ClinicalReader) -> list[ProtocolOption]:
     """What the composer's *what* field offers.
 
-    Read from `PROTOCOLS` rather than from `config.protocols`, because that
-    table is seeded from this dict on every boot and a protocol nothing has run
-    yet still has to be dispatchable — a fresh database has no interviews, so a
-    list derived from the review table would be empty exactly when it is needed.
+    Read from `OFFERED` rather than from `config.protocols`, because that table
+    is seeded from the catalog on every boot and a protocol nothing has run yet
+    still has to be dispatchable — a fresh database has no interviews, so a list
+    derived from the review table would be empty exactly when it is needed.
+
+    `OFFERED` and not `PROTOCOLS`, because the catalog keeps every version ever
+    published so old interviews stay readable, and a superseded one is not
+    something to offer a clinician composing a new call.
     """
-    return [ProtocolOption(id=p.id, label=p.label) for p in PROTOCOLS.values()]
+    return [ProtocolOption(id=p.id, label=p.label) for p in OFFERED.values()]
 
 
 @router.post("/interviews", status_code=201)

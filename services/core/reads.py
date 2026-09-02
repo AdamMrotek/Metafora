@@ -219,6 +219,31 @@ _ORDER: dict[str, str] = {
     "recent": f"{_ACTIVITY} desc, i.id desc",
 }
 
+#: Every flag a version can raise, both lists as one relation.
+#:
+#: `redFlags` is Block II — a phrase, matched before generation. The rest are
+#: `QuestionFlag`s hanging off Block I's questions, resolved against one answer
+#: after it. They are unioned here because `id`, `label` and `action` mean the
+#: same on both and the record files a hit the same way for both, so
+#: `flag_count`, `worst_flag` and the escalation band stay one question with one
+#: answer. *Which* net caught it is on the event and not here — that is what
+#: `concern.raised` is a separate event type for.
+#:
+#: `coalesce(..., '[]')` because a version published before question flags
+#: existed carries no `flags` key, and a version is never edited in place.
+_FLAG_CATALOG = """
+        select value from jsonb_array_elements(pr.version -> 'redFlags')
+        union all
+        select qflag.value
+        from jsonb_array_elements(pr.version -> 'script' -> 'sections')  sec,
+             jsonb_array_elements(sec -> 'questions')                    q,
+             jsonb_array_elements(coalesce(q -> 'flags', '[]'::jsonb))   qflag
+"""
+
+#: The two event types a hit is filed under. Both carry `hits` and `action` in
+#: the same shape, which is what lets one unnest serve them.
+_FLAGGING = "('safety.scanned', 'concern.raised')"
+
 #: What the gate found, per interview. `transcript.events` holds a
 #: `safety.scanned` for every committed turn — including the ones that matched
 #: nothing, which are the evidence the gate ran — so the join unnests `hits` and
@@ -254,9 +279,9 @@ _SUMMARY_FROM = f"""
         -- Left, so a hit the pinned version does not name still counts toward
         -- `flag_count` -- something matched, and the row should say so -- while
         -- contributing no action, which sorts it below every real one.
-        left join lateral jsonb_array_elements(pr.version -> 'redFlags') flag
+        left join lateral ({_FLAG_CATALOG}) flag
                on flag.value ->> 'id' = hit
-        where e.interview_id = i.id and e.type = 'safety.scanned'
+        where e.interview_id = i.id and e.type in {_FLAGGING}
     ) g on true
 """
 
@@ -414,9 +439,9 @@ _ESCALATIONS = f"""
         from clinical.interviews i
         join clinical.patients  p  on p.id  = i.patient_id
         join config.protocols   pr on pr.id = i.protocol_id
-        join transcript.events  e  on e.interview_id = i.id and e.type = 'safety.scanned'
+        join transcript.events  e  on e.interview_id = i.id and e.type in {_FLAGGING}
         cross join lateral jsonb_array_elements_text(e.payload -> 'hits') hit
-        join lateral jsonb_array_elements(pr.version -> 'redFlags') flag
+        join lateral ({_FLAG_CATALOG}) flag
              on flag.value ->> 'id' = hit
         where {OWNED_BY}
           and i.acknowledged_at is null

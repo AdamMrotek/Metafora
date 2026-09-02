@@ -73,6 +73,42 @@ class SafetyScanned(_Event):
     action: str | None = None
 
 
+class ConcernRaised(_Event):
+    """What a question's own flags made of one answer.
+
+    Deliberately the same shape as `SafetyScanned` where the record reads it —
+    `hits` and `action` — because the escalation band, `flag_count` and
+    `worst_flag` are one question asked of the whole call and must not need two
+    answers. Everything else here is provenance, and the reason this is its own
+    event type rather than a second `safety.scanned`: the gate cannot be talked
+    out of a match and this can, so a clinician is owed the difference between
+    a flag the words tripped and one a model proposed.
+
+    Written on **every** capture, including the ones that raise nothing — for
+    the same reason a scan that matched nothing is still written. An event only
+    where something fired is a record that cannot show the question was looked at.
+    """
+
+    type: Literal["concern.raised"] = "concern.raised"
+    #: The field the answer landed in — which is what says *which question*.
+    field: str
+    #: Every flag raised, whichever trigger raised it. Unnested by `reads.py`.
+    hits: list[str]
+    #: The worst action across `hits`, ranked by `safety.SEVERITY`.
+    action: str | None = None
+    #: The enum member the capture pass classified the answer into, if the
+    #: question declared any. The `value` trigger's whole input.
+    answer: str | None = None
+    #: The subset of `hits` a table lookup produced, and the subset the model
+    #: named. Both are in `hits`; these say which net caught it.
+    matched: list[str] = []
+    judged: list[str] = []
+    #: A flag the model named that this question does not declare. Dropped, and
+    #: recorded — a refusal nobody can see is indistinguishable from an
+    #: authorisation.
+    ignored: str | None = None
+
+
 class LlmCompleted(_Event):
     type: Literal["llm.completed"] = "llm.completed"
     text: str
@@ -151,6 +187,7 @@ LogEvent = Annotated[
     | TurnCommitted
     | OpeningSpoken
     | SafetyScanned
+    | ConcernRaised
     | LlmCompleted
     | ToolCalled
     | TtsSpoken

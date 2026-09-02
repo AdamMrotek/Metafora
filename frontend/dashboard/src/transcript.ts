@@ -17,6 +17,12 @@ import type { TranscriptEvent } from '@metafora/contracts';
  * one of them is rendered, including the ones that matched nothing: a scan that
  * cleared a turn is the evidence the gate ran, and it is the only thing on this
  * screen that can show what was looked for and not found.
+ *
+ * `concern.raised` is the other net and is drawn as its own line rather than
+ * folded into the patient's. It happens *after* the answer, not before it, and
+ * what raised it is a judgement about that answer rather than a phrase in it —
+ * so a reader has to be able to tell the two apart at a glance. That is the
+ * whole reason it is a separate event type and not a second `safety.scanned`.
  */
 
 export type Line = {
@@ -73,6 +79,33 @@ export function lines(events: TranscriptEvent[]): Line[] {
       const last = out[out.length - 1];
       if (last && last.who.startsWith('Patient') && !last.scan) last.scan = scan;
       else out.push({ seq: event.seq, at: event.at, who: 'Safety', text: '', scan });
+      continue;
+    }
+
+    if (event.type === 'concern.raised') {
+      const hits = Array.isArray(payload.hits) ? (payload.hits as string[]) : [];
+      const judged = Array.isArray(payload.judged) ? (payload.judged as string[]) : [];
+      const action = str(payload, 'action');
+      const field = str(payload, 'field');
+      // Which net caught it, named. A clinician deciding what to do about a
+      // flag is owed the difference between one the protocol looked up and one
+      // a model proposed, and this line is the only place that difference is
+      // legible.
+      const how = hits.length
+        ? hits.map((id) => (judged.includes(id) ? `${id} (judged)` : id)).join(', ')
+        : '';
+      out.push({
+        seq: event.seq,
+        at: event.at,
+        who: 'Review',
+        text: '',
+        scan: {
+          hit: hits.length > 0,
+          text: hits.length
+            ? `${field} reviewed · raised ${how}${action ? ` · ${action}` : ''}`
+            : `${field} reviewed · raised nothing`,
+        },
+      });
     }
   }
 

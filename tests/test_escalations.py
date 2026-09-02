@@ -238,3 +238,178 @@ async def test_a_stranger_cannot_acknowledge_your_escalation(live_db):
 async def test_acknowledging_an_interview_that_does_not_exist_is_not_found(live_db):
     with pytest.raises(reads.NotFound):
         await acknowledgements.acknowledge(user(), "iv_never_existed")
+
+
+# ─── and the flags that hang off a question ──────────────────────────────────
+#
+# Same band, same counts, same acknowledgement. A `QuestionFlag` is raised by
+# `concerns.py` after an answer rather than by the gate before generation, and
+# it is filed under `concern.raised` rather than `safety.scanned` — so these
+# assert the one thing that must *not* differ: the record reads them as one
+# list. Which net caught it is on the event, for a clinician; it is not a second
+# kind of escalation for the dashboard to learn.
+
+V2 = "proto_preop_check_v2"
+Q_URGENT = "qf_meds_still_taking"
+Q_FLAGGED = "qf_attendance_at_risk"
+Q_CRITICAL = "qf_attendance_cannot"
+
+
+async def a_v2_call(
+    pool,
+    *,
+    owner: str | None = ALICE,
+    concerns: tuple[str, ...] = (),
+    gate_flags: tuple[str, ...] = (),
+    first_name: str = "Ruth",
+) -> str:
+    """One v2 interview carrying whichever of the two kinds of hit is asked for.
+
+    Both go into `transcript.events` in the same shape, which is the property
+    under test — `hits` and `action`, differing only in `type`.
+    """
+    from services.agent.config.protocol import PROTOCOLS
+    from services.agent.safety import SEVERITY
+
+    n = next(_seq)
+    patient_id, interview_id = f"pt_qf_{n}", f"iv_qf_{n}"
+    version = PROTOCOLS[V2]
+    by_id = {f.id: f.action for f in version.red_flags}
+    by_id |= {
+        f.id: f.action
+        for section in version.script.sections
+        for q in section.questions
+        for f in q.flags
+    }
+
+    def worst(ids):
+        actions = [by_id[i] for i in ids if i in by_id]
+        return max(actions, key=lambda a: SEVERITY[a]) if actions else None
+
+    await pool.execute(
+        "insert into clinical.patients (id, first_name, origin, clinician_email) "
+        "values ($1, $2, 'dispatched', $3)",
+        patient_id,
+        first_name,
+        owner,
+    )
+    await pool.execute(
+        "insert into clinical.interviews (id, protocol_id, patient_id, status, started_at) "
+        "values ($1, $2, $3, 'completed', now())",
+        interview_id,
+        V2,
+        patient_id,
+    )
+    rows = []
+    if gate_flags:
+        rows.append(("safety.scanned", {"blocked": False, "hits": list(gate_flags),
+                                        "action": worst(gate_flags)}))
+    if concerns:
+        rows.append(("concern.raised", {"field": "meds_stopped", "hits": list(concerns),
+                                        "action": worst(concerns), "judged": list(concerns)}))
+    for seq, (kind, payload) in enumerate(rows, start=1):
+        await pool.execute(
+            "insert into transcript.events (interview_id, session_id, seq, type, at, payload) "
+            "values ($1, $2, $3, $4, now(), $5)",
+            interview_id,
+            f"sess_qf_{n}",
+            seq,
+            kind,
+            payload,
+        )
+    return interview_id
+
+
+async def test_a_question_flag_reaches_the_band_like_any_other(live_db):
+    """Resolved against the pinned version exactly as a red flag is — and it has
+    to be, because `_FLAG_CATALOG` is where the two lists become one."""
+    interview_id = await a_v2_call(live_db, concerns=(Q_URGENT,), first_name="Ruth")
+
+    band = {e.interview_id: e for e in await reads.escalations(user())}
+    line = band[interview_id]
+    assert line.patient_first_name == "Ruth"
+    assert line.flag_label == "Anticoagulant not stopped as instructed"
+    assert line.action == "urgent_escalate"
+    assert (line.due_at - line.raised_at).total_seconds() == TIMEOUT_MINUTES * 60
+
+
+async def test_a_flagged_question_flag_raises_no_band(live_db):
+    """The same line the gate's yellows are held to. `soft_review` is owed to
+    the unit, not to a person today."""
+    interview_id = await a_v2_call(live_db, concerns=(Q_FLAGGED,))
+    band = {e.interview_id for e in await reads.escalations(user())}
+    assert interview_id not in band
+
+
+async def test_a_critical_question_flag_is_a_red(live_db):
+    """`end_call` stopped the call. Somebody has to make contact, and that is
+    what the band is for."""
+    interview_id = await a_v2_call(live_db, concerns=(Q_CRITICAL,))
+    band = {e.interview_id: e for e in await reads.escalations(user())}
+    assert band[interview_id].action == "end_call"
+    assert band[interview_id].flag_label == "Patient cannot attend"
+
+
+async def test_a_review_that_raised_nothing_is_not_a_flag(live_db):
+    """`concern.raised` is written on every capture, including the ones that
+    raise nothing — the evidence the answer was looked at. An empty `hits`
+    array must unnest to no rows, or every completed call is an escalation."""
+    interview_id = await a_v2_call(live_db, concerns=())
+    await live_db.execute(
+        "insert into transcript.events (interview_id, session_id, seq, type, at, payload) "
+        "values ($1, 'sess_qf_empty', 9, 'concern.raised', now(), $2)",
+        interview_id,
+        {"field": "attendance", "hits": [], "action": None},
+    )
+
+    assert interview_id not in {e.interview_id for e in await reads.escalations(user())}
+    page = await reads.interviews(user(), sort="recent", limit=500)
+    row = next(r for r in page.rows if r.id == interview_id)
+    assert row.flag_count == 0
+    assert row.worst_flag is None
+
+
+async def test_one_call_flagged_by_both_nets_is_one_line_at_the_worse_level(live_db):
+    """The acknowledgement is per interview, so the band is too. A call the gate
+    flagged and a question escalated is one errand, named by the worse of them."""
+    interview_id = await a_v2_call(
+        live_db, concerns=(Q_URGENT,), gate_flags=("yf_attendance_risk",)
+    )
+
+    lines = [e for e in await reads.escalations(user()) if e.interview_id == interview_id]
+    assert len(lines) == 1
+    assert lines[0].action == "urgent_escalate"
+    assert lines[0].flag_label == "Anticoagulant not stopped as instructed"
+
+    page = await reads.interviews(user(), sort="recent", limit=500)
+    row = next(r for r in page.rows if r.id == interview_id)
+    assert row.flag_count == 2, "both hits count; they are distinct rules"
+    assert row.worst_flag == "urgent_escalate"
+
+
+async def test_the_urgent_tile_counts_a_question_flag(live_db):
+    """The tile and the band are the same number said twice, and both are over
+    the caller's whole scope. A tile that could not see one of the two lists
+    would disagree with the band under it."""
+    before = (await reads.overview(user())).urgent
+    await a_v2_call(live_db, concerns=(Q_URGENT,))
+    assert (await reads.overview(user())).urgent == before + 1
+
+
+async def test_acknowledging_clears_a_question_flag_the_same_way(live_db):
+    """One `update`, one band line gone. The acknowledgement knows nothing about
+    which net raised the thing it is clearing, and must not have to."""
+    interview_id = await a_v2_call(live_db, concerns=(Q_URGENT,))
+    assert interview_id in {e.interview_id for e in await reads.escalations(user())}
+
+    await acknowledgements.acknowledge(user(), interview_id)
+    assert interview_id not in {e.interview_id for e in await reads.escalations(user())}
+
+
+async def test_a_version_without_question_flags_still_reads(live_db):
+    """v1 carries no `flags` key on its questions at all. The catalog coalesces
+    it away rather than producing nothing, which would take the red flags with
+    it — the failure would look like the gate had stopped working."""
+    interview_id = await a_call(live_db, flags=(RED,))
+    band = {e.interview_id: e for e in await reads.escalations(user())}
+    assert band[interview_id].action == "urgent_escalate"

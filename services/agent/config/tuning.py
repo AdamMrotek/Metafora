@@ -147,3 +147,40 @@ sentence the patient waits for.
 
 TTS_SILENCE_GUARD_MS = 20
 """Kept either side of the trim, so a soft onset is never clipped."""
+
+
+CONCERN_HOLD_MS = 1500
+"""How long the assistant's reply waits for the capture pass, on a question that
+can stop the call.
+
+Both passes run on the same turn, so which of them finishes first is a race, and
+on exactly one kind of question the answer matters: one whose `QuestionFlag` set
+contains an `end_call`. There, the speech pass is answering as though the
+interview continues while the capture pass is deciding that it does not, and
+whichever lands first is what the patient hears.
+
+Measured on real calls (`transcript.events`, ms from the committed turn to each
+pass finishing):
+
+    speech  1938   capture  1471      capture first — nothing is heard
+    speech  3451   capture  3490      even
+    speech  2091   capture  2188      even
+    speech  5536   capture 13926      capture 8.4 s behind — a sentence got out
+
+So the passes normally finish within ~700 ms of each other and the hold is free;
+the fourth is the one this exists for. `iv_5abb66a97374` is that call: the
+patient said "No, no, no, no." and heard "I hear you can't make it." before the
+closure, because the first sentence had already been synthesised by the time the
+concern was known.
+
+1.5 s covers the measured spread with room, and is short enough to be an
+ordinary pause if it is ever spent in full. It is not a fix for the outlier —
+nothing here can be, because that pass was eight seconds late — it is the bound
+on how long the patient waits before the assistant speaks anyway. Past it the
+reply is released and the call behaves as it did: the concern still stops it,
+one sentence later.
+
+Only questions that can stop the call are held. Every other turn is untouched,
+because on those there is nothing the capture pass could say that the speech
+pass needs to wait for.
+"""

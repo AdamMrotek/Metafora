@@ -33,6 +33,11 @@ def setup():
 
 
 async def call(machine, writer, wire, **kwargs):
+    """One tool call with a patient turn behind it, which is the only kind a
+    real call makes: `SafetyGate` counts the turn before either model sees the
+    transcript it was captured from."""
+    if kwargs.pop("spoke", True):
+        machine.note_turn()
     return await dispatch(
         machine=machine, writer=writer, wire=wire,
         tool_name=kwargs.pop("tool_name", "update_intake"),
@@ -134,6 +139,59 @@ async def test_a_call_after_the_interview_is_complete_is_refused():
 
     assert result["ok"] is False
     assert "complete" in result["error"]
+
+
+async def test_a_capture_with_no_patient_turn_behind_it_is_refused():
+    """The capture pass, re-run on a context it has already answered, has no new
+    utterance to draw on — so it reuses the last one against the next field, or
+    invents one. Both happened on `iv_eca23eefda25`, and the invented answer to
+    the closing question completed the interview and hung up on a patient
+    mid-question.
+
+    `run_llm=False` in `pipeline.py` is what stops the re-run happening. This is
+    the rule that holds if it ever does.
+    """
+    machine, writer, wire = setup()
+    result = await call(machine, writer, wire, spoke=False)
+
+    assert result["ok"] is False
+    assert "no patient turn" in result["error"]
+    assert machine.captured == NOTHING_CAPTURED
+    assert machine.current.id == "s1.q1", "a stray call must not walk the machine forward"
+
+    refusal = [e for e in writer.events if isinstance(e, ToolCalled)][0]
+    assert refusal.authorised is False and refusal.reason
+
+
+async def test_one_turn_records_one_field():
+    """The second call on the same turn is the one that was wrong. It is refused
+    whatever it names — the previous field, or the one the machine just moved
+    to."""
+    machine, writer, wire = setup()
+    assert (await call(machine, writer, wire))["ok"] is True
+
+    second = await dispatch(
+        machine=machine, writer=writer, wire=wire, tool_name="update_intake",
+        # What the re-run actually produced on `iv_eca23eefda25`, having nothing
+        # left to reuse: not an answer, and not something a patient could say.
+        arguments={"field": "anything_else", "value": "The answer:\u00a0 \n\n…\u00a0\n\n…"},
+    )
+    assert second["ok"] is False
+    assert machine.captured["anything_else"] is None
+    assert machine.complete is False, "the closing question is still the patient's to answer"
+
+
+async def test_the_next_turn_lifts_the_refusal():
+    """The rule is one field per turn, not one field per call. A patient who
+    speaks again is a patient with something new on the record."""
+    machine, writer, wire = setup()
+    await call(machine, writer, wire)
+    result = await call(
+        machine, writer, wire,
+        arguments='{"field": "anything_else", "value": "no, nothing"}',
+    )
+    assert result == {"ok": True, "recorded": "anything_else"}
+    assert machine.complete is True
 
 
 async def test_every_refusal_is_recorded_and_answered():

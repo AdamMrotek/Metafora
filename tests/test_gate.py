@@ -37,8 +37,12 @@ def gate_and_pushed():
     async def on_blocked(result):
         closed.append(result)
 
-    gate = SafetyGate(WARMUP_V1, writer, on_blocked=on_blocked)
+    turns: list = []
+    gate = SafetyGate(
+        WARMUP_V1, writer, on_blocked=on_blocked, on_turn=lambda: turns.append(1)
+    )
     gate.closed = closed  # type: ignore[attr-defined]
+    gate.turns = turns  # type: ignore[attr-defined]
     pushed: list = []
 
     async def capture(frame, direction=FrameDirection.DOWNSTREAM):
@@ -130,3 +134,31 @@ async def test_interim_transcriptions_do_not_trip_the_gate(gate_and_pushed):
 
     assert not gate.closed
     assert not [e for e in writer.events if isinstance(e, SafetyScanned)]
+    # Nor is one a turn. Counting it would spend a budget the patient has not
+    # yet filled, and the committed frame behind it would find it gone.
+    assert gate.turns == []
+
+
+async def test_a_clean_turn_is_counted_where_it_is_passed_on(gate_and_pushed):
+    """`InterviewMachine.authorise` refuses a capture with no patient turn behind
+    it, and this is where it learns there was one. The count belongs next to the
+    push because they are the same fact: the model is about to see an utterance.
+    """
+    gate, _, _ = gate_and_pushed
+    await gate.process_frame(
+        transcription("my day is going well thanks"), FrameDirection.DOWNSTREAM
+    )
+    assert len(gate.turns) == 1
+
+
+async def test_a_blocked_turn_is_not_counted(gate_and_pushed):
+    """A turn no model may see cannot license a field either. Both properties
+    fall out of the same `return`, which is the reason the counting lives here
+    and not in the observer."""
+    gate, pushed, _ = gate_and_pushed
+    await gate.process_frame(
+        transcription("sometimes I feel like I want to die"), FrameDirection.DOWNSTREAM
+    )
+
+    assert gate.turns == []
+    assert not [f for f, _ in pushed if isinstance(f, TranscriptionFrame)]

@@ -8,6 +8,20 @@ the model declining to tell us something.
 
 There is no model in this file and there must never be one. A gate that
 asks an LLM whether it is safe to call an LLM is not a gate.
+
+Matching is by phrase, and it handles no negation: *"no new pain at all"*
+fires a flag looking for "new pain". False positives are therefore certain
+rather than unlikely, which is what decides how far a flag is allowed to
+reach:
+
+    A red flag is legitimate only when the correct response to a false
+    positive is still acceptable. Stopping an admin call so a person rings
+    back is. Producing clinical advice is not, at any accuracy.
+
+That is the rule that stops the flag set growing into symptom triage. It is
+also why the levels are graded by what they *ask of a human* — critical
+stops the call, urgent owes a clinician a decision, flagged owes the unit
+one — and not by how serious the words sounded.
 """
 
 import re

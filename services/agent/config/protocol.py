@@ -27,6 +27,7 @@ from shared.contracts.models import (
     InterviewScript,
     ProtocolVersion,
     Question,
+    QuestionFlag,
     RedFlag,
     ReportGuidance,
     Section,
@@ -420,8 +421,395 @@ PREOP_SHORT_V1 = ProtocolVersion(
 )
 
 
+# ─── The current generation ──────────────────────────────────────────────────
+#
+# v1 authored four levels; there are three — critical (`end_call`), urgent
+# (`urgent_escalate`) and flagged (`soft_review`). A call with no flag is review
+# ready, which is what `note_only` meant, so nothing is authored at that level
+# any more.
+#
+# Published as a new id rather than edited in place. `config.protocols` is
+# append-only and `db.seed_protocols()` inserts `on conflict do nothing`, so an
+# edit to v1 would reach no database that has already booted — and every hit in
+# `transcript.events` resolves its label and its action against the version its
+# interview pinned, which is what lets a call filed last month keep meaning what
+# it meant.
+#
+# For the same reason **nothing is renamed**. A flag id is an opaque key the
+# record has already filed; the level is the `action`, never the `rf_` / `yf_`
+# prefix, which is left over from an earlier vocabulary. The two flags whose
+# level changed are `model_copy`s of v1's, so their ids, labels and patterns are
+# byte-identical and only the action moved.
+
+#: New in v2, and it has to exist: moving those two out of `urgent_escalate`
+#: empties the level, and a level nothing can raise is a claim the system does
+#: not keep. Nothing in v1 caught new pain where they are about to operate,
+#: which is what `timeout_minutes = 120` was always the clock for.
+#:
+#: No prefix: the old ids keep theirs because renaming is churn against a filed
+#: key, and a new one does not adopt a dead convention.
+#:
+#: Every pattern is a phrase worth a look out of context. Never `pain`, `sore`
+#: or `hurts` on their own — `safety.py` handles no negation, so *"no new pain
+#: at all"* fires this, and the flag is only legitimate because ringing someone
+#: who did not need it is an acceptable answer to that.
+SURGICAL_SITE_CHANGE = RedFlag(
+    id="surgical_site_change",
+    label="New or worsening pain at the operation site",
+    patterns=[
+        "new pain",
+        "getting worse",
+        "worse than it was",
+        "worse since",
+        "red and hot",
+        "hot to touch",
+        "swollen up",
+        "started swelling",
+        "oozing",
+        "weeping",
+    ],
+    action="urgent_escalate",
+    proving_utterance="it's gone red and hot where they're operating, and it's getting worse",
+)
+
+
+def _v1_flag(flag_id: str) -> RedFlag:
+    return next(f for f in PREOP_CHECK_V1.red_flags if f.id == flag_id)
+
+
+#: Urgent to the *booking*, not to the patient: the unit decides proceed, move
+#: or cancel. Neither is a clinical judgement this system is entitled to treat
+#: as one, and every call produces them — which is what makes a band that is
+#: usually absent worth reading.
+_NOW_FLAGGED = [
+    _v1_flag("rf_fitness_change").model_copy(update={"action": "soft_review"}),
+    _v1_flag("rf_anticoagulant_taken").model_copy(update={"action": "soft_review"}),
+]
+
+# ─── Block I, second generation · the flag hangs off the question ────────────
+#
+# Every flag above is a `RedFlag`: a phrase, matched against the turn, before
+# generation, knowing nothing about what was asked. That ordering is what makes
+# it unbypassable, and it is also its ceiling. *"No."* to *are you still able to
+# come?* is a cancellation with no phrase in it to match, so the gate reads it
+# as an ordinary turn and the call carries on asking about fasting.
+#
+# So v2 authors flags on the questions as well. Two triggers, and the order
+# between them is the whole point:
+#
+#   · `when_value` is a value the question's own `EnumCapture` already declares
+#     — a table lookup, no model in it, no negation problem. Anything the enum
+#     can say should be said this way.
+#   · `when` is a sentence a model judges the answer against, for what the enum
+#     cannot: metaphor, indirection, a hedge that is really a refusal.
+#
+# `attendance` carries both on its first flag and that is the shape to copy:
+# the lookup is the floor, the judgement is the net under the phrasings nobody
+# anticipated. Neither replaces the gate. The gate still runs on every turn,
+# still before generation, and is still the only thing here that cannot be
+# argued with.
+#
+# Ids are prefixed `qf_` and are unique against the red-flag ids of the same
+# version, because a hit is filed by id and read back against the version the
+# interview pinned. Nothing reuses a `RedFlag` id even where it means the same
+# thing — `qf_meds_still_taking` and `rf_anticoagulant_taken` are the same
+# concern reached two different ways, and a clinician reading the band is owed
+# the difference.
+#
+# Everything except `flags` is v1's, verbatim: same ids, field keys, labels and
+# capture types, so a value captured under v2 means what the same key means
+# under v1. `test_protocol_preop.py` holds that.
+
+_PREOP_V2_SCRIPT = InterviewScript(
+    sections=[
+        Section(
+            id="s1",
+            title="Getting there",
+            questions=[
+                Question(
+                    id="q1",
+                    ask=(
+                        "You're booked for Thursday the fourth, arriving at seven. "
+                        "Are you still able to come?"
+                    ),
+                    field_key="attendance",
+                    label="Able to attend",
+                    capture=EnumCapture(values=["confirmed", "at_risk", "cannot_attend"]),
+                    if_unclear="one follow-up, then record what they said in their words",
+                    must_capture=True,
+                    flags=[
+                        # The one flag on this protocol that stops the call, and
+                        # the only one that is not a clinical matter at all. The
+                        # rest of the script is about an operation that is going
+                        # to happen; once it is not, fasting times and escorts
+                        # are questions about nothing. Stopping is the honest
+                        # thing to do and the sentence says what happens next.
+                        QuestionFlag(
+                            id="qf_attendance_cannot",
+                            label="Patient cannot attend",
+                            when_value="cannot_attend",
+                            when=(
+                                "the patient says they will not be there — a refusal, a "
+                                "clash, a change of mind, anything that means the slot on "
+                                "Thursday goes unused"
+                            ),
+                            action="end_call",
+                            say=(
+                                "I'm sorry to hear that. I'll stop here rather than take you "
+                                "through the rest, and I'll make sure the unit contacts you "
+                                "to rebook. Thank you for letting us know — goodbye."
+                            ),
+                            proving_answer="no, I can't make it",
+                        ),
+                        QuestionFlag(
+                            id="qf_attendance_at_risk",
+                            label="Attendance in doubt",
+                            when_value="at_risk",
+                            # Worded around `yf_attendance_risk`'s own patterns
+                            # on purpose. A condition a model is asked to judge
+                            # must not quote a phrase the gate matches
+                            # independently, or the prompt starts to look like
+                            # where Block II is enforced. `test_prompts.py`
+                            # holds that, and caught this line.
+                            when=(
+                                "the patient expects to come but is not certain — travel, "
+                                "work, childcare, a relative they are caring for, anything "
+                                "they raise as a reason it may fall through"
+                            ),
+                            action="soft_review",
+                            proving_answer="I think so, but I might have to move it",
+                        ),
+                    ],
+                ),
+                Question(
+                    id="q2",
+                    ask=(
+                        "You'll need an adult to take you home and stay overnight. "
+                        "Have you got someone?"
+                    ),
+                    field_key="escort_home",
+                    label="Escort home",
+                    capture=TextCapture(),
+                    if_unclear="ask who it is; a name or a relationship is enough",
+                    must_capture=True,
+                    flags=[
+                        # No enum to look up, so this one is judgement only —
+                        # and it is the case the gate is worst at. `yf_no_escort`
+                        # matches "no one", "nobody", "get a taxi"; it does not
+                        # match "my sister will drop me off and head back", which
+                        # is the same answer said helpfully.
+                        QuestionFlag(
+                            id="qf_escort_none",
+                            label="No adult escort home",
+                            when=(
+                                "there is no adult who will both take them home and stay "
+                                "overnight — a taxi, a bus, someone who can only drop them "
+                                "off, or no arrangement at all"
+                            ),
+                            action="soft_review",
+                            proving_answer="my sister can drop me off but she can't stop over",
+                        )
+                    ],
+                ),
+            ],
+        ),
+        Section(
+            id="s2",
+            title="Before you come in",
+            questions=[
+                Question(
+                    id="q1",
+                    ask=(
+                        "Nothing to eat from midnight, water until six, nothing after. "
+                        "Is that clear?"
+                    ),
+                    field_key="fasting_ack",
+                    label="Fasting understood",
+                    capture=BooleanCapture(),
+                    if_unclear="say the times once more, then record what they said",
+                    must_capture=True,
+                    flags=[
+                        # "Yes" is not the same as understood, which is the
+                        # entire reason this is a judgement and not a boolean
+                        # read straight off the capture type.
+                        QuestionFlag(
+                            id="qf_fasting_not_understood",
+                            label="Fasting instructions not understood",
+                            when=(
+                                "the patient has not taken the times in, or says something "
+                                "that means they will have eaten or drunk inside them — "
+                                "including a question back that shows they have them wrong"
+                            ),
+                            action="soft_review",
+                            proving_answer="so I can still have a cup of tea at seven then?",
+                        )
+                    ],
+                ),
+                Question(
+                    id="q2",
+                    ask="You were asked to stop your apixaban on Monday. Were you able to?",
+                    field_key="meds_stopped",
+                    label="Anticoagulant stopped",
+                    capture=EnumCapture(values=["stopped", "still_taking", "unsure"]),
+                    if_unclear="ask when the last dose was",
+                    must_capture=True,
+                    flags=[
+                        # Urgent here, where the gate's `rf_anticoagulant_taken`
+                        # is flagged. Not a contradiction: the gate matches
+                        # "still taking" anywhere in the call, on any subject,
+                        # which is why it was demoted. This fires only on the
+                        # answer to the question that asked, so it means what it
+                        # says and can carry the weight the gate's version
+                        # cannot.
+                        QuestionFlag(
+                            id="qf_meds_still_taking",
+                            label="Anticoagulant not stopped as instructed",
+                            when_value="still_taking",
+                            when=(
+                                "the patient took a dose on or after Monday, or describes a "
+                                "last dose later than Sunday night"
+                            ),
+                            action="urgent_escalate",
+                            proving_answer="I took one this morning",
+                        ),
+                        # Authored a level below `still_taking`, which is a
+                        # choice and not an obvious one: an unsure dose and a
+                        # taken dose are the same question to the list. Raise it
+                        # if the unit would rather be rung either way.
+                        QuestionFlag(
+                            id="qf_meds_unsure",
+                            label="Unsure whether the anticoagulant was stopped",
+                            when_value="unsure",
+                            when="the patient cannot say whether or when they stopped",
+                            action="soft_review",
+                            proving_answer="I think so? I'd have to look in the box",
+                        ),
+                    ],
+                ),
+                Question(
+                    id="q3",
+                    ask=(
+                        "Has anything changed with your health since your pre-op "
+                        "appointment — cough, cold, temperature, new medicines?"
+                    ),
+                    field_key="health_change",
+                    label="Change in health",
+                    capture=TextCapture(),
+                    if_unclear="one follow-up, then record what they said in their words",
+                    must_capture=True,
+                    flags=[
+                        # Deliberately at the level v2 moved `rf_fitness_change`
+                        # to. The question-level version is more precise, not
+                        # more serious: what makes a change urgent is
+                        # `SURGICAL_SITE_CHANGE`, and that is still the gate's.
+                        QuestionFlag(
+                            id="qf_health_change",
+                            label="Change in health since pre-op assessment",
+                            when=(
+                                "anything has changed — an illness, a hospital visit, a new "
+                                "medicine, a symptom they did not have at the pre-op "
+                                "appointment. Not a change they explicitly rule out."
+                            ),
+                            action="soft_review",
+                            proving_answer="I've had a chesty cough since the weekend",
+                        )
+                    ],
+                ),
+            ],
+        ),
+        # `CLOSING` unchanged and unflagged. What a patient raises on their own
+        # turn is not an answer to a question, so there is no question for a
+        # flag to hang off — the gate is what watches that turn, as it watches
+        # every other.
+        CLOSING,
+    ]
+)
+
+
+PREOP_CHECK_V2 = PREOP_CHECK_V1.model_copy(
+    update={
+        "id": "proto_preop_check_v2",
+        "label": "Pre-op check v2",
+        # Block I moved too, for the first time. v1's questions carry no flags
+        # and must not grow any: a question flag changes what a version does,
+        # and v1 is what interviews already filed are read back against.
+        "script": _PREOP_V2_SCRIPT,
+        "red_flags": [
+            SELF_HARM,
+            SURGICAL_SITE_CHANGE,
+            *_NOW_FLAGGED,
+            _v1_flag("yf_attendance_risk"),
+            _v1_flag("yf_no_escort"),
+            # `nf_anxiety` is not here. Nothing was owed on it, which is what a
+            # call with no flag already says. The sentence still reaches the
+            # record through the field it was said in.
+        ],
+        # The rota is not the escalation route and never became one: a call-out
+        # rings the clinician who owns the board, then the clinic's front desk,
+        # which is one number belonging to the clinic rather than something a
+        # protocol author picks. `timeout_minutes` stays — it is the deadline
+        # the dashboard's escalation band draws.
+        "urgent": UrgentEscalation(rota=[], timeout_minutes=120),
+    }
+)
+
+#: The short one, on the same footing. It carries `SURGICAL_SITE_CHANGE` because
+#: its whole purpose is a thirty-second run that can still escalate: once the
+#: anticoagulant flag is flagged rather than urgent, `SELF_HARM` would be the
+#: only escalation left, and that is not a flag anyone drives a smoke test
+#: through. It fires on `CLOSING`'s open turn, which every script ends on.
+#: The two questions, taken from v2 rather than v1 so they arrive with their
+#: flags attached. Same ids, same field keys — a short run is a shorter script
+#: and never a different one.
+_PREOP_SHORT_V2_SCRIPT = InterviewScript(
+    sections=[
+        Section(
+            id="s1",
+            title="Getting there",
+            questions=[_PREOP_V2_SCRIPT.sections[0].questions[0]],
+        ),
+        Section(
+            id="s2",
+            title="Before you come in",
+            questions=[_PREOP_V2_SCRIPT.sections[1].questions[1]],
+        ),
+        CLOSING,
+    ]
+)
+
+PREOP_SHORT_V2 = PREOP_SHORT_V1.model_copy(
+    update={
+        "id": "proto_preop_short_v2",
+        "label": "Pre-op check (short) v2",
+        "script": _PREOP_SHORT_V2_SCRIPT,
+        "red_flags": [
+            SELF_HARM,
+            SURGICAL_SITE_CHANGE,
+            next(f for f in PREOP_CHECK_V2.red_flags if f.id == "rf_anticoagulant_taken"),
+            next(f for f in PREOP_CHECK_V2.red_flags if f.id == "yf_attendance_risk"),
+        ],
+        "urgent": PREOP_CHECK_V2.urgent,
+    }
+)
+
+
+#: Everything ever published. The runtime and `db.seed_protocols()` read this,
+#: because an interview pinned to a superseded version must still run and still
+#: be readable — that is the whole of what append-only buys.
 PROTOCOLS: dict[str, ProtocolVersion] = {
     WARMUP_V1.id: WARMUP_V1,
     PREOP_CHECK_V1.id: PREOP_CHECK_V1,
     PREOP_SHORT_V1.id: PREOP_SHORT_V1,
+    PREOP_CHECK_V2.id: PREOP_CHECK_V2,
+    PREOP_SHORT_V2.id: PREOP_SHORT_V2,
+}
+
+#: What may be dispatched *now* — the current generation. `GET /protocols` lists
+#: this and `dispatch.py` validates against it, so nobody can queue a version
+#: that has been superseded. Publishing retires a version for new calls and
+#: never for old records, and those are two different sets.
+OFFERED: dict[str, ProtocolVersion] = {
+    WARMUP_V1.id: WARMUP_V1,
+    PREOP_CHECK_V2.id: PREOP_CHECK_V2,
+    PREOP_SHORT_V2.id: PREOP_SHORT_V2,
 }

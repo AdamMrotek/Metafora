@@ -22,7 +22,7 @@ C_DIM := \033[2m
 C_OFF := \033[0m
 
 .PHONY: help setup install dev api sfu web stop restart ports preflight \
-        check test test-pg test-e2e lint typecheck imports build contracts e2e dash \
+        check test test-pg test-e2e lint typecheck imports build contracts e2e dash reseed \
         logs latency safety doctor clean guard-env \
         sleep wake fly-status guard-fly
 
@@ -135,6 +135,9 @@ build: ## Production build of both frontends
 
 contracts: ## Regenerate shared/contracts from the pydantic models
 	uv run python scripts/gen_contracts.py
+
+reseed: guard-env ## Delete the seeded demo calls so the next boot writes them again. usage: make reseed [ONLY=iv_demo_07]
+	uv run python scripts/reseed.py $(if $(ONLY),--only $(ONLY)) $(if $(YES),--yes)
 
 e2e: guard-env ## Drive a real call — needs a live backend. usage: make e2e ROOM=<roomName>
 	@test -n "$(ROOM)" || { echo "usage: make e2e ROOM=<roomName>"; exit 1; }

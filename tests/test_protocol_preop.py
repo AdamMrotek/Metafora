@@ -40,7 +40,12 @@ class RecordingWriter:
 
 
 async def record(machine, field, value):
-    """One authorised `update_intake`, through the real dispatch path."""
+    """One authorised `update_intake`, through the real dispatch path.
+
+    The turn is noted first because the gate notes it first: a value is a thing
+    the patient said, and dispatch will not take one that nobody said.
+    """
+    machine.note_turn()
     return await dispatch(
         machine=machine,
         writer=RecordingWriter(),
@@ -81,6 +86,7 @@ def test_the_tool_matrix_names_every_state_the_interview_can_be_in():
     assert {s.id for s in m.states} <= allowed
 
     for _ in m.states:
+        m.note_turn()  # the state is what is under test, so give it a turn to spend
         assert m.authorise("update_intake").authorised is True, f"refused at {m.current.id}"
         m.advance()
 

@@ -23,6 +23,7 @@ def test_compiles_the_script_into_fully_qualified_states():
 
 def test_authorises_a_tool_only_from_a_state_the_matrix_names():
     m = InterviewMachine(WARMUP_V1)
+    m.note_turn()
     assert m.authorise("update_intake").authorised is True
 
     unknown = m.authorise("exfiltrate_record")
@@ -32,11 +33,31 @@ def test_authorises_a_tool_only_from_a_state_the_matrix_names():
 
 def test_refuses_tools_once_the_interview_is_complete():
     m = InterviewMachine(WARMUP_V1)
+    m.note_turn()
     m.advance()
     assert m.complete is False, "the closing question is still to be asked"
     m.advance()
     assert m.complete is True
     assert m.authorise("update_intake").authorised is False
+
+
+def test_refuses_a_capture_with_no_patient_turn_behind_it():
+    """Nothing may be recorded before the patient has said anything, and nothing
+    twice off the back of one thing they said. A field is an utterance; the
+    count of utterances is the budget."""
+    m = InterviewMachine(WARMUP_V1)
+    refused = m.authorise("update_intake")
+    assert refused.authorised is False
+    assert "no patient turn" in refused.reason
+
+    m.note_turn()
+    assert m.authorise("update_intake").authorised is True
+
+    m.capture("day_mood", "pretty good")
+    assert m.authorise("update_intake").authorised is False, "the turn is spent"
+
+    m.note_turn()
+    assert m.authorise("update_intake").authorised is True
 
 
 def test_refuses_to_capture_a_field_the_protocol_never_declared():

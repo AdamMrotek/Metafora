@@ -83,26 +83,63 @@ def capture_prompt(protocol: ProtocolVersion) -> str:
     Everything about *how to speak* is absent for the same reason: this pass is
     never heard, and its prose is discarded.
     """
-    fields = "\n".join(
-        f"- {q.field_key} — {q.ask}"
-        for s in protocol.script.sections
-        for q in s.questions
+    questions = [q for s in protocol.script.sections for q in s.questions]
+
+    def described(q) -> str:
+        line = f"- {q.field_key} — {q.ask}"
+        if q.capture.type == "enum":
+            line += f"\n  answer: one of {', '.join(q.capture.values)}"
+        return line
+
+    fields = "\n".join(described(q) for q in questions)
+
+    #: The authored conditions, verbatim. This is the only prose in either
+    #: prompt that a model is asked to *judge* rather than say, and it is here
+    #: rather than in `system_prompt` for the same reason the tools are: the
+    #: pass that speaks must never be told a concern exists, or it will
+    #: acknowledge one out loud to the patient it was raised about.
+    concerns = "\n".join(
+        f"- {flag.id} — on {q.field_key}, when {flag.when}"
+        for q in questions
+        for flag in q.flags
+        if flag.when
     )
 
-    return "\n".join(
-        [
-            # Wrapped differently from the source line, this would be a
-            # different prompt. The text is ported verbatim; the line length is
-            # not ours to tidy.
-            "You are recording a clinical intake call. You are not speaking to the patient — another",  # noqa: E501
-            "pass is doing that, and anything you write as prose is discarded. Your only job is to",
-            "write the record.",
+    lines = [
+        # Wrapped differently from the source line, this would be a
+        # different prompt. The text is ported verbatim; the line length is
+        # not ours to tidy.
+        "You are recording a clinical intake call. You are not speaking to the patient — another",  # noqa: E501
+        "pass is doing that, and anything you write as prose is discarded. Your only job is to",
+        "write the record.",
+        "",
+        "The fields to record:",
+        fields,
+        "",
+        "When the patient has answered one, call update_intake to record it, using their own",
+        "words where you can. Record only what they actually said. If they have not answered a",
+        "field yet, do not call update_intake for it, and never guess at a value.",
+    ]
+
+    if protocol.script.sections and any(q.capture.type == "enum" for q in questions):
+        lines += [
             "",
-            "The fields to record:",
-            fields,
-            "",
-            "When the patient has answered one, call update_intake to record it, using their own",
-            "words where you can. Record only what they actually said. If they have not answered a",
-            "field yet, do not call update_intake for it, and never guess at a value.",
+            "Where a field lists answers above, also set `answer` to the one the patient's reply",
+            "amounts to. `value` still carries their own words; `answer` is only which of the",
+            "listed options that is. If their reply fits none of them, leave `answer` out.",
         ]
-    )
+
+    if concerns:
+        lines += [
+            "",
+            "Some answers raise a concern for the clinician. These are the only ones there are:",  # noqa: E501
+            concerns,
+            "",
+            "Set `flag` to the id of a concern the answer raises, or to `none`. Judge the",
+            "answer to the question being asked, not the words alone — a refusal, a hedge or a",
+            "figure of speech counts if it means the condition. Only a concern listed against",
+            "the field you are recording, and only one; if two fit, take the first. Say nothing",
+            "of this to the patient — you are not the pass that speaks.",
+        ]
+
+    return "\n".join(lines)

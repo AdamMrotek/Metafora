@@ -119,7 +119,7 @@
 .item__t{display:flex; justify-content:space-between; align-items:baseline; gap:var(--s-3)}
 .item__n{font-size:var(--t-sm); font-weight:500; color:var(--fg)}
 .item__m{font-size:var(--t-2xs); color:var(--fg-4); font-family:var(--font-mono); white-space:nowrap; flex:none}
-.item__s{display:block; font-size:var(--t-xs); color:var(--fg-4); margin-top:3px; line-height:1.4}
+.item__s{display:flex; align-items:center; flex-wrap:wrap; gap:var(--s-2); font-size:var(--t-xs); color:var(--fg-4); margin-top:3px; line-height:1.4}
 
 /* ── interview detail: what the queue's arrow opens ── */
 .crumb{display:flex; align-items:center; gap:var(--s-2); padding:var(--s-4) var(--s-6); border-bottom:1px solid var(--line-soft); font-size:var(--t-xs); color:var(--fg-4)}
@@ -597,4 +597,30 @@ textarea.fld__v, select.fld__v { font: inherit; font-size: var(--t-xs); width: 1
   .panes { grid-template-columns: 1fr }
   .stats { justify-content: flex-start; text-align: left; gap: var(--s-6) }
   .stat { align-items: flex-start }
+}
+
+/* Walking the band. More than one red is the normal case, and the band draws
+   one of them; the arrows move through the rest without leaving the screen or
+   turning the band into a list. Quiet by default — the two verbs on the right
+   are the actions, this is only how you get to the one you want. */
+.rail__nav { display: flex; align-items: center; gap: 2px; flex: none }
+.rail__arrow {
+  background: transparent;
+  color: #fff;
+  border: 0;
+  font: inherit;
+  font-size: var(--t-md);
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  opacity: 0.8;
+}
+.rail__arrow:hover { background: rgba(255, 255, 255, 0.16); opacity: 1 }
+.rail__i {
+  font-size: var(--t-2xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.87;
+  min-width: 42px;
+  text-align: center;
 }

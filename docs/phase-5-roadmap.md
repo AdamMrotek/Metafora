@@ -9,8 +9,9 @@ the unowned demo rows; until 5b, a red flag was counted on the row and nothing m
 obliged to clear it; until the ledger exists, the composer's hashes come from
 `frontend/dashboard/src/demo.ts`.
 
-This document stages that into **5·0 identity → 5a dispatch → 5b red flags → 5b·1 the flag set →
-5b·2 push → 5c ledger**, each independently shippable, in the order the MVP line needs them (deploy → intake →
+This document stages that into **5·0 identity → 5a dispatch → 5b red flags → 5b·1 three issue types
+→ 5b·2 push → 5b·3 the model as second detector → 5c ledger**, each independently shippable, in the
+order the MVP line needs them (deploy → intake →
 return → review → sign). 5·0 is the odd one out and is **shipped**: it depends on none of the
 others and was the cheapest way to shrink `demo.ts`, which every later stage otherwise inherits.
 
@@ -19,9 +20,9 @@ predicate in `reads.py` discriminates; `clinical.interviews.acknowledged_at` is 
 predicate, and 5c is built on both.
 
 **5b was three jobs and is now two, and the first of them is shipped.** The acknowledgement is 5b;
-re-authoring the flag set and what the patient hears on a triage flag is 5b·1. Neither waits for
-the other — 5b reads the flag's *action* out of the protocol version each interview pinned, so the
-flags may move underneath it without moving a line already on the band.
+the three issue types and what the patient hears on an urgent one is 5b·1. Neither waits for the
+other — 5b reads the flag's *action* out of the protocol version each interview pinned, so the flags
+may move underneath it without moving a line already on the band.
 
 **5a deliberately drops the email channel.** The roadmap's dispatch sends an emailed link 24h
 before `scheduled_for`; an email provider is still unchosen and would be a fourth egress
@@ -443,70 +444,128 @@ answer produces a yellow row and no band.
 
 ---
 
-# 5b·1 · The flag set re-read
+# 5b·1 · Three issue types
 
-**Done when:** the four actions are named for what they ask of a human, the triage red catches
-something worth catching, and the rule that keeps the flag set from growing into symptom triage is
-written down in `safety.py`.
+**Done when:** every flag in the config declares which of three types it is, and the config has been
+gone through against that.
 
-Split from 5b because none of it is needed to clear a flag, and all of it changes what a patient
-hears. Order between them is free; 5b is written against the protocol as it ships today, and this
-stage moves flags underneath a band that reads the action rather than the id.
+## The three types
 
-## Red and yellow are the four actions, renamed
-
-Not a new axis to store — a name for the grouping `SEVERITY` already makes, 1:1:
-
-| | action | the call | the patient hears | who acts, and by when |
+| | action | the call | the patient hears | who acts |
 |---|---|---|---|---|
-| **Red · emergency** | `end_call` | stops | 999 / Samaritans, **and** that the practice will contact them | the practice, today. Custodial, not clinical |
-| **Red · triage** | `urgent_escalate` | continues | nothing authored — see below | a clinician, before the list |
-| **Yellow** | `soft_review` | continues | nothing authored | the unit — **proceed / move / cancel** |
-| **Note** | `note_only` | continues | nothing | context in the record |
+| **Critical** | `end_call` | stops | 999 / Samaritans, and that the practice will contact them | the practice, today |
+| **Urgent** | `urgent_escalate` | continues, unchanged | at the end: the clinic will contact them | a clinician, before the list |
+| **Flagged** | `soft_review` | continues, unchanged | nothing | the unit — proceed / move / cancel |
 
-**`rf_fitness_change` and `rf_anticoagulant_taken` move to `soft_review`**, renamed `yf_`. They are
-urgent to the *booking*, not to the patient. Yellow is then one thing: those two plus
-`yf_attendance_risk` and `yf_no_escort` are all *the unit has a decision to make about this
-booking*. Every call produces yellows; reds are rare, which is what makes a band that is usually
-absent worth reading.
+There is no fourth. A call with no flag is **review ready**, which is what `note_only` used to mean,
+so nothing is authored at that level any more. The literal stays in `RedFlagAction` and `format.ts`,
+because rows already filed under it still have to read.
 
-**The triage red has to be authored.** Once those two move, `urgent_escalate` is empty — and
-nothing in `PREOP_CHECK_V1` catches *new pain where they are about to operate*, which is what
-`PREOP_CHECK_V1.urgent.timeout_minutes = 120` is the clock for. Its patterns must be phrases worth
-a look out of context — `new pain`, `getting worse`, `red and hot` — never `pain`. `safety.py`
-handles no negation, so false positives are certain, and the rule that makes them acceptable
-belongs in that file:
+The three names are for prose and the screen; the wire literals do not change. **Flag ids are opaque
+keys** — the type is the `action`, never the prefix on the id (`reads.py:159-167`), and an id is
+what the record has already filed, so nothing is renamed to match its type.
 
-> **A red flag is legitimate only when the correct response to a false positive is still
-> acceptable.** Stopping an admin call so a person rings back is. Producing clinical advice is not,
-> at any accuracy.
+## Going through the config
 
-That is what stops the flag set growing into symptom triage.
+Set each flag in `services/agent/config/protocol.py` to the type it actually is, and delete anything
+that is no type at all. Two things to hold to:
 
-## The patient hears nothing new, and that is decided
+- **Every level that exists must be populated.** If moving flags empties `urgent_escalate`, author
+  one — otherwise the level is a claim about the system that nothing can raise.
+- **A flag may only be critical or urgent if the response to a false positive is acceptable.**
+  `safety.py` matches phrases and handles no negation, so false positives are certain. That rule
+  belongs in that file, and it is what stops the set growing into symptom triage:
 
-An earlier draft allowed `say` on `urgent_escalate`, spoken alongside the generated reply. It is
-dropped, on a mechanical objection rather than an editorial one: the gate can only speak by pushing
-a `TTSSpeakFrame` (`gate.py:83`), and that is safe on the blocked path *because* the transcript
-frame is swallowed there and nothing else is generating. On a triage flag the turn goes on to the
-model, so the gate's sentence and the generated reply race into the same TTS — two utterances with
-no defined order, under barge-in constants (`config/tuning.py`) set for one.
+  > **A red flag is legitimate only when the correct response to a false positive is still
+  > acceptable.** Stopping an admin call so a person rings back is. Producing clinical advice is
+  > not, at any accuracy.
 
-The authored-sentence rule stands for the reds that do stop the call — every one, on `SELF_HARM`'s
-model:
+Patterns for a critical or an urgent have to be phrases worth a look out of context — never a single
+common word.
 
-> **[what this system is doing] + [a route that does not depend on this system]**
+## Publish a new version, do not edit the old one
 
-Nothing in this deployment pages anybody, so *"a clinician will call you"* is a promise it cannot
-keep. If a triage sentence is ever wanted, it needs the pipeline to guarantee it precedes the
-generated turn — a real change to `pipeline.py`, and its own decision.
+`config.protocols` is append-only and seeded `on conflict do nothing`, so editing a protocol in place
+reaches no database that has already booted.
 
-**Tests:** the moved flags scan `soft_review`; the new triage red scans `urgent_escalate` on its
-`proving_utterance`; `test_prompts.py`'s line holds; the band from 5b follows the flags without
-changing, because it reads the action.
+So publish **`PREOP_CHECK_V2`** and **`PREOP_SHORT_V2`**: identical to v1 except `red_flags` and
+`label`. v1 stays in the file untouched, and its tests stay green as the proof that no filed record
+moved. `urgent` keeps `timeout_minutes` — the band's deadline — and authors `rota=[]`.
 
-**Verify:** an apixaban answer now produces a yellow row and no band, where before it produced a
-band. The new triage red produces one.
+`PROTOCOLS` becomes everything ever published, because a v1 interview must still run and read. A
+second dict, `OFFERED`, is what `GET /protocols` lists and `dispatch.py` accepts, so nobody can queue
+a superseded version.
+
+## What the patient hears on an urgent flag
+
+The turn is untouched: no interruption, no change to the question, nothing said at the time. After
+the goodbye, teardown speaks one authored sentence — the clinic will be in touch. That is where it
+is safe, because nothing else is generating; mid-call it would race the model's reply into the same
+TTS. It is one bit on the machine ("an urgent fired"), not a `say` on the flag, so two urgent flags
+still produce one goodbye.
+
+## The call-out — not now
+
+Today a critical or an urgent raises a red banner on the owning clinician's dashboard, and that is
+the whole of the escalation. Later it should ring that clinician directly, and failing that the
+clinic's front desk. Not designed here.
+
+There is no rota. The front desk is one number belonging to the clinic, not something a protocol
+author picks, so `urgent.rota` has no future consumer — the field stays on the model only because
+v1's stored versions contain it.
+
+## The demo record moves with it
+
+The band is drawn almost entirely from the seeded calls, so they move too: repoint the pre-op calls
+in `seed.py` to v2, correct the `action` on every hit whose type changed, drop any hit whose flag v2
+no longer defines (an id the version does not define is an orphan — counted, ranked nowhere), and
+add one call that raises the urgent flag.
+
+Needs `scripts/reseed.py`: `seed.py` is `on conflict do nothing` and cannot correct a row it has
+already written. It is on the branch and uncommitted — land it first.
+
+## Steps
+
+1. `services/agent/safety.py` — the false-positive rule as a docstring paragraph. No code change.
+2. `services/agent/config/protocol.py` — the config gone through, published as `PREOP_CHECK_V2` and
+   `PREOP_SHORT_V2`, plus `OFFERED`. v1 untouched. `queue.py:20-22` says the pre-op protocol
+   exercises "all four red-flag actions"; it now exercises three.
+3. `routes/interviews.py:118` and `dispatch.py:64` — read `OFFERED`.
+4. The closing sentence — authored on the protocol version beside `urgent`, spoken in `end_call.py`'s
+   existing sequence against the hangup when an urgent fired.
+5. `services/core/seed.py` — repoint and correct, then `uv run python scripts/reseed.py`.
+6. `docs/example-interview.md` — a header note that it documents v1, and what v2 changed.
+7. Tests, below.
+
+Nothing in `frontend/` changes. `format.ts`'s `RED` and `FLAG_WORDS` are exhaustive over
+`RedFlagAction`, which this stage does not touch.
+
+## Tests
+
+- v1's authored table passes unedited (`test_protocol_preop.py`, `test_escalations.py`,
+  `test_table.py`) — the proof that publishing v2 moved no filed record.
+- v2's gate table: every flag scans to its own type on its own `proving_utterance`, and a turn
+  hitting two types ranks by the worse and keeps both hits.
+- Across every protocol in `PROTOCOLS`: `say` if and only if `end_call`; flag ids unique within a
+  version; every `proving_utterance` scans to its own flag; no level that the protocol claims is
+  empty.
+- The closing sentence: once on an urgent call, once on a call with two urgents, never on a
+  flagged-only call, never on one the gate stopped (`end_call`'s own `say` covers it).
+- No flag is authored `note_only`, and `note_only` is still a member of `RedFlagAction`.
+- `OFFERED` ⊆ `PROTOCOLS`; `POST /interviews` refuses a superseded `protocol_id`.
+- `test_prompts.py`'s line holds untouched.
+
+## Verify
+
+1. `make check`, `make test-pg`.
+2. `DEMO_PROTOCOL_ID=proto_preop_check_v2 make dev`. Say something that is now only flagged — a
+   flagged row, no band, nothing said to the patient.
+3. Say the urgent flag's `proving_utterance` — the call carries on as normal, and after the goodbye
+   the patient is told the clinic will be in touch. The band names it, decision owed
+   `timeout_minutes` after the scan.
+4. An interview filed under v1 reads exactly as it did before.
+5. The composer offers v2 and not v1.
+
 
 ---
 
@@ -541,6 +600,31 @@ also the only part that needs the gate to report upward: 5b's flag reaches Postg
 **Verify:** two clinicians, two browsers. Drive a call into a red — the owner's band appears
 untouched, the stranger's does not. Stop the backend: the owner's dashboard degrades to 5b and
 reconnects on its own.
+
+---
+
+# 5b·3 · The model as second detector
+
+**Done when:** a critical or an urgent that no authored phrase matched is still raised — by the
+model — and the record says which of the two found it.
+
+Phrases are the guarantee; the model is the recall, never a replacement. The gate runs before
+generation and can stop a turn; a model's verdict arrives after it, so the earliest it can act is
+the next one. `safety.py` still holds no model.
+
+1. **Where it runs** — the capture pass, which is already a silent LLM holding tools. A second tool,
+   `raise_flag(id, why)`, beside `update_intake`. The speech pass still never learns tools exist.
+2. **What it costs** — `tools.py:54-76` is written for one tool's `field`/`value` and needs a branch;
+   a flag tool is state-independent, which `allowed_states` can only say by naming every state.
+3. **What the protocol gains** — a `watch_for` line per flag, for the capture prompt. Patterns stay
+   mandatory for critical and urgent, so those two still work when the model does not.
+4. **The record says which found it** — a model-raised flag is not the same claim as a matched one
+   and must not be filed as one.
+5. **A late critical** — the model can raise `end_call` a turn after the sentence it would have
+   prevented. Whether that still ends the call is this stage's decision.
+6. **Tests** — both detectors land the same shape with different provenance; a flag id the version
+   does not define is refused like any unauthorised tool call; `test_prompts.py`'s line holds.
+
 
 ---
 
@@ -592,10 +676,17 @@ remaining stage scopes on it — so 5c can be built whenever, subject to the ord
 under it.
 
 5b·1 is free of 5b in both directions. It is the only stage that changes the call itself, and 5b is
-written against the protocol as it ships today, so neither blocks the other.
+written against the protocol as it ships today, so neither blocks the other. It has one dependency
+outside the roadmap: its seed changes need `scripts/reseed.py`, because `seed.py` cannot correct a
+row it has already written.
 
 5b·2 needs 5b, and nothing needs 5b·2 — it can be skipped indefinitely, because the band on load is
 the fallback the push degrades to.
+
+5b·3 needs 5b·1. Nothing needs 5b·3 — the authored phrases are the guarantee with or without it.
+
+The call-out is not staged at all. It is the first thing here that would place an outbound call: a
+fourth egress, the clinician's number, and the clinic's.
 
 5a inherits one simplification from 5·0: the Deployments composer's patient select can show an NHS
 number, because the patients it lists have one.

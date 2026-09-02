@@ -36,7 +36,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.groq.stt import GroqSTTService
-from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.llm_service import (
+    FunctionCallParams,
+    FunctionCallResultProperties,
+)
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from pipecat.turns.user_turn_processor import UserTurnProcessor
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
@@ -156,6 +159,11 @@ def build_bot(
         text_aggregator=OrpheusAggregator(),
     )
 
+    # Constructed here rather than inline in the pipeline below, because the
+    # tool handler needs a handle on it: a question flag that stops the call is
+    # decided in this branch and can only be *spoken* from the main path.
+    ending = EndOfInterview(machine, writer, wire)
+
     async def _on_update_intake(params: FunctionCallParams) -> None:
         # The permission matrix runs in-process before anything is captured;
         # the result string is what the model sees, folded back into context.
@@ -165,8 +173,25 @@ def build_bot(
             wire=wire,
             tool_name=params.function_name,
             arguments=params.arguments,
+            # Every authorised capture, not only the ones that raise something:
+            # the reply held for a question that can stop the call is waiting on
+            # this, and a reply held for a concern that never came is a reply
+            # nobody hears.
+            on_concern=ending.answered,
         )
-        await params.result_callback(result)
+        # `run_llm=False` is the whole reason this pass stays honest. Pipecat
+        # defaults a tool result to True — the aggregator re-runs inference so a
+        # model can say something about what its call returned. This pass has
+        # nothing to say: `SilentBranch` discards its prose, and the patient
+        # hears the speech pass. What the re-run does instead is see a context
+        # it has already answered, notice the question has moved on, and record
+        # the previous turn against the next field — or, with nothing left to
+        # reuse, invent one. On `iv_eca23eefda25` it did both, and the invented
+        # answer to the closing question completed the interview and hung up on
+        # a patient who had not been given the chance to answer it.
+        await params.result_callback(
+            result, properties=FunctionCallResultProperties(run_llm=False)
+        )
 
     # The tool table, compiled from the protocol: the model can only call what
     # `machine.tool_definitions()` advertises, and the handler on each schema
@@ -233,7 +258,7 @@ def build_bot(
             stt,
             # Before either context, before either model. This is the ordering
             # the whole in-the-media-path argument buys.
-            SafetyGate(protocol, writer, on_blocked=on_blocked),
+            SafetyGate(protocol, writer, on_blocked=on_blocked, on_turn=machine.note_turn),
             # After the gate, so a blocked transcript never ends a turn and so
             # never reaches a model. `broadcast_frame` pushes the turn frames
             # downstream into the `ParallelPipeline`, which forks them to both
@@ -253,8 +278,9 @@ def build_bot(
                 [capture_user, capture_llm, capture_assistant, SilentBranch()],
             ),
             # Between the models and the TTS: it sees the response frames and
-            # hangs up after the last answer has been spoken.
-            EndOfInterview(machine, writer, wire),
+            # hangs up after the last answer has been spoken — or after the
+            # sentence a blocking concern left it to say.
+            ending,
             tts,
             transport.output(),
             speech_assistant,

@@ -17,7 +17,7 @@ import re
 import uuid
 from typing import Any
 
-from services.agent.config.protocol import PROTOCOLS
+from services.agent.config.protocol import OFFERED
 from services.core import db, reads
 from services.core.reads import OWNED_BY, NotFound
 from shared.auth import CurrentUser
@@ -61,7 +61,10 @@ def _clean(request: DispatchRequest) -> tuple[str | None, str | None]:
 
 async def create_interview(user: CurrentUser, request: DispatchRequest) -> InterviewSummary:
     """Queue one interview, and return the row the review table draws for it."""
-    if request.protocol_id not in PROTOCOLS:
+    # `OFFERED`, not `PROTOCOLS`: a superseded version stays runnable and
+    # readable for the interviews already pinned to it, and is not something a
+    # new call may be queued against.
+    if request.protocol_id not in OFFERED:
         raise Refused(f"no protocol {request.protocol_id}")
     patient_id, first_name = _clean(request)
 

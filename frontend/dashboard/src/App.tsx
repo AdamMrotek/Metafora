@@ -100,7 +100,19 @@ function Rail() {
   // both, from one predicate, which is why the sentence and the count agree.
   const open = overview?.escalations ?? [];
   const total = overview?.urgent ?? 0;
-  const latest = open[0];
+
+  // Which of the open reds is on the band. The list is newest first, so 0 is
+  // the one that just arrived and the arrows walk back through the rest in
+  // place — a full-bleed red band that grew into a list would stop being a
+  // band. Acknowledging shortens the list underneath us, so the position is
+  // clamped on read and corrected in an effect rather than trusted.
+  const [at, setAt] = useState(0);
+  const index = open.length === 0 ? 0 : Math.min(at, open.length - 1);
+  const latest = open[index];
+  const step = (by: number) => setAt((n) => (n + by + open.length) % open.length);
+  useEffect(() => {
+    if (at !== index) setAt(index);
+  }, [at, index]);
 
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -147,6 +159,32 @@ function Rail() {
           {refused ?? `${latest.patientFirstName} · ${latest.flagLabel} · ${owed(latest)}`}
         </span>
       </span>
+      {open.length > 1 && (
+        <span className="rail__nav">
+          <button
+            className="rail__arrow"
+            type="button"
+            aria-label="Previous red flag"
+            onClick={() => step(-1)}
+          >
+            ‹
+          </button>
+          {/* The position, not the count — the headline above already says how
+              many are waiting, and `total` counts the whole caseload while this
+              list is capped. */}
+          <span className="rail__i" aria-live="polite">
+            {index + 1} of {open.length}
+          </span>
+          <button
+            className="rail__arrow"
+            type="button"
+            aria-label="Next red flag"
+            onClick={() => step(1)}
+          >
+            ›
+          </button>
+        </span>
+      )}
       <span className="rail__c">{elapsed(latest.raisedAt)}</span>
       {/* Read first, take second. Acknowledging is a statement that somebody
           has this call, and the primary action on the band is the one that

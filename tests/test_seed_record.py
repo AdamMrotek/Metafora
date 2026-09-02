@@ -189,8 +189,14 @@ async def test_the_row_carries_what_the_gate_found(seeded):
 async def test_a_finished_call_is_either_flagged_or_clean(seeded):
     """The two tiles on the dashboard. A call the gate cleared end to end is the
     one a clinician can stop thinking about, and it only exists as a number if
-    the flagged ones are countable — every action has to be represented, and at
-    least one call has to carry none of them."""
+    the flagged ones are countable — every level has to be represented, and at
+    least one call has to carry none of them.
+
+    Three levels, not four. `note_only` was context on the record with nothing
+    owed, which is what a call carrying no flag already says, so nothing is
+    authored at that level any more — and a seed that still produced one would
+    mean a protocol still did.
+    """
     finished = [r for r in await rows(seeded) if r.status in ("completed", "abandoned")]
 
     assert [r for r in finished if r.flag_count == 0]
@@ -198,8 +204,8 @@ async def test_a_finished_call_is_either_flagged_or_clean(seeded):
         "end_call",
         "urgent_escalate",
         "soft_review",
-        "note_only",
     }
+    assert "note_only" not in {r.worst_flag for r in finished}
     # The one the band above the table owns, and the only one `outcome` names.
     assert next(r for r in finished if r.outcome == "safety").worst_flag == "end_call"
 

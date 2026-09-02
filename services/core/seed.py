@@ -19,7 +19,7 @@ no natural key beyond `(session_id, seq)`, which is unique — so it conflicts o
 that rather than needing an id.
 
 **These are not calls that happened.** Every other interview on the deployment
-is: a visitor pressed Start and spoke. These fifteen are written, and they carry
+is: a visitor pressed Start and spoke. These eighteen are written, and they carry
 `pt_demo_*` patients and `iv_demo_*` ids so they can be told apart in one query.
 """
 
@@ -33,7 +33,7 @@ from services.agent.config.protocol import PROTOCOLS
 
 logger = logging.getLogger(__name__)
 
-PREOP = "proto_preop_check_v1"
+PREOP = "proto_preop_check_v2"
 WARMUP = "proto_warmup_v1"
 
 
@@ -157,132 +157,80 @@ CALLS: tuple[Call, ...] = (
             "anything_else": "Nothing raised",
         },
     ),
-    # ── urgent_escalate: the call continues, and today nothing pages ─────────
+    # ── flagged: the call is untouched and the unit decides ──────────────────
     Call(
-        n=2,
-        patient="pt_demo_02",
+        n=20,
+        patient="pt_demo_05",
         protocol=PREOP,
         status="completed",
         outcome="complete",
-        started_ago=timedelta(hours=6, minutes=5),
+        started_ago=timedelta(hours=9, minutes=15),
         ran=timedelta(minutes=7),
         turns=(
-            opening("Ben"),
+            opening("Erin"),
             a(ATTEND),
-            p("Yes, I'm coming."),
+            p("Yes, I'll be there."),
             a(ESCORT),
-            p("My neighbour's driving me and staying the night."),
+            p("My sister's collecting me and staying over."),
             a(FASTING),
-            p("Understood, nothing after midnight."),
+            p("Nothing from midnight, water until six. Got it."),
             a(MEDS),
-            p(
-                "Ah — I'm still taking the apixaban, I forgot to stop.",
-                "rf_anticoagulant_taken",
-                action="urgent_escalate",
-            ),
-            a(HEALTH),
-            p("No, otherwise I've been fine."),
-            a(CLOSE),
-            p("No, that's it."),
-        ),
-        captured={
-            "attendance": "Confirmed",
-            "escort_home": "Neighbour, driving and staying overnight",
-            "fasting_ack": "Understood",
-            "meds_stopped": "Still taking — forgot to stop on Monday",
-            "health_change": "No change reported",
-            "anything_else": "Nothing raised",
-        },
-    ),
-    Call(
-        n=3,
-        patient="pt_demo_03",
-        protocol=PREOP,
-        status="completed",
-        outcome="complete",
-        started_ago=timedelta(days=1, hours=2),
-        ran=timedelta(minutes=8),
-        turns=(
-            opening("Chloe"),
-            a(ATTEND),
-            p("Yes, still coming."),
-            a(ESCORT),
-            p("My partner's taking me."),
-            a(FASTING),
-            p("Yes, that's clear."),
-            a(MEDS),
-            p("I stopped it Monday."),
+            p("I'm not on anything like that."),
             a(HEALTH),
             p(
-                "The GP started me on antibiotics on Monday for a chest thing.",
+                "I've had a bit of a cough and a temperature since the weekend.",
                 "rf_fitness_change",
-                action="urgent_escalate",
+                action="soft_review",
             ),
             a(CLOSE),
             p("No, nothing else."),
         ),
         captured={
             "attendance": "Confirmed",
-            "escort_home": "Partner",
+            "escort_home": "Sister, collecting and staying overnight",
             "fasting_ack": "Understood",
-            "meds_stopped": "Stopped Monday",
-            "health_change": "Started on antibiotics Monday for a chest infection",
+            "meds_stopped": "Not on an anticoagulant",
+            "health_change": "Cough and temperature since the weekend",
             "anything_else": "Nothing raised",
         },
     ),
-    # ── two reds on one call ─────────────────────────────────────────────────
-    #
-    # The case the acknowledgement is shaped around and the only one the rest of
-    # this file leaves undrawn. `clinical.interviews.acknowledged_at` is per
-    # interview and not per flag because "I have this" is a statement about the
-    # call, so a call carrying two reds is one line on the band and is cleared
-    # once — and a seed where every flagged call carries exactly one flag can
-    # demonstrate that claim but never exercise it.
-    #
-    # Both are `urgent_escalate`, so neither stopped the call: the interview
-    # still ran to the end and its outcome is `complete`. What makes it a red is
-    # the scan, not the ending.
     Call(
-        n=18,
-        patient="pt_demo_08",
+        n=21,
+        patient="pt_demo_09",
         protocol=PREOP,
         status="completed",
         outcome="complete",
-        started_ago=timedelta(hours=1, minutes=40),
-        ran=timedelta(minutes=7),
+        started_ago=timedelta(days=2, hours=5),
+        ran=timedelta(minutes=6),
         turns=(
-            opening("Hari"),
+            opening("Iris"),
             a(ATTEND),
-            p("Yes, I'll be there."),
+            p("Yes, still coming."),
             a(ESCORT),
-            p("My brother's driving me and staying over."),
+            p("My daughter's taking me home."),
             a(FASTING),
-            p("Nothing from midnight, water until six. Understood."),
+            p("Yes, that's clear."),
             a(MEDS),
             p(
-                "No — I'm still taking it. Nobody told me to stop.",
+                "I took it this morning, actually — I thought I was meant to keep going.",
                 "rf_anticoagulant_taken",
-                action="urgent_escalate",
+                action="soft_review",
             ),
             a(HEALTH),
-            p(
-                "I have had a temperature since the weekend, and a bit of a cough.",
-                "rf_fitness_change",
-                action="urgent_escalate",
-            ),
+            p("No, nothing's changed."),
             a(CLOSE),
             p("No, that's everything."),
         ),
         captured={
             "attendance": "Confirmed",
-            "escort_home": "Brother, driving and staying overnight",
+            "escort_home": "Daughter",
             "fasting_ack": "Understood",
-            "meds_stopped": "Still taking — was not told to stop",
-            "health_change": "Temperature since the weekend, with a cough",
+            "meds_stopped": "Still taking — took a dose this morning",
+            "health_change": "No change reported",
             "anything_else": "Nothing raised",
         },
     ),
-    # ── soft_review ──────────────────────────────────────────────────────────
+    # ── flagged: the booking, not the patient ────────────────────────────────
     Call(
         n=4,
         patient="pt_demo_04",
@@ -355,7 +303,7 @@ CALLS: tuple[Call, ...] = (
             "anything_else": "Asked for a call back about the date",
         },
     ),
-    # ── note_only ────────────────────────────────────────────────────────────
+    # ── nothing flagged, and still worth reading ─────────────────────────────
     Call(
         n=6,
         patient="pt_demo_06",
@@ -377,11 +325,7 @@ CALLS: tuple[Call, ...] = (
             a(HEALTH),
             p("No, nothing."),
             a(CLOSE),
-            p(
-                "I'm a bit nervous about the anaesthetic, that's all.",
-                "nf_anxiety",
-                action="note_only",
-            ),
+            p("I'm a bit nervous about the anaesthetic, that's all."),
         ),
         captured={
             "attendance": "Confirmed",
@@ -392,29 +336,94 @@ CALLS: tuple[Call, ...] = (
             "anything_else": "Nervous about the anaesthetic",
         },
     ),
-    # ── the gate stopping a call ─────────────────────────────────────────────
+    # ── urgent: the call runs on, and a clinician owes an answer ─────────────
+    #
+    # The only `urgent_escalate` in the seed, and the reason the level is not
+    # empty. Nothing about the call says it: it ran to the end, every field was
+    # captured, and the row is `completed / complete` like any other. The flag
+    # is the whole of the difference, which is what the escalation band exists
+    # to say out loud.
+    #
+    # `iv_demo_07` is written again here. The rename migration removed it so the
+    # seed could rewrite it with the current name, and it is the call this
+    # patient did not otherwise have.
     Call(
         n=7,
         patient="pt_demo_07",
         protocol=PREOP,
+        status="completed",
+        outcome="complete",
+        started_ago=timedelta(hours=5, minutes=40),
+        ran=timedelta(minutes=6),
+        turns=(
+            opening("Greta"),
+            a(ATTEND),
+            p("Yes, I'll be there."),
+            a(ESCORT),
+            p("My son's driving me and staying over."),
+            a(FASTING),
+            p("Nothing from midnight. Understood."),
+            a(MEDS),
+            p("I stopped it on Monday, as I was told."),
+            a(HEALTH),
+            p(
+                "The hip's been getting worse this week, and the skin over it has "
+                "gone red and hot.",
+                "surgical_site_change",
+                action="urgent_escalate",
+            ),
+            a(CLOSE),
+            p("No, that's everything."),
+        ),
+        captured={
+            "attendance": "Confirmed",
+            "escort_home": "Son, driving and staying overnight",
+            "fasting_ack": "Understood",
+            "meds_stopped": "Stopped Monday",
+            "health_change": "Hip worse this week; skin over it red and hot",
+            "anything_else": "Nothing raised",
+        },
+    ),
+    # ── the gate stopping a call ─────────────────────────────────────────────
+    #
+    # The only `end_call` in the seed, and the only red that stops a call rather
+    # than letting it run on. `blocked=True` is what `safety.scanned` carries
+    # when the gate fires: the agent reads the flag's own `say` and hangs up, so
+    # the row is filed `abandoned / safety` with four fields already captured —
+    # which is what the detail screen draws against a call that ended early.
+    Call(
+        n=19,
+        patient="pt_demo_10",
+        protocol=PREOP,
         status="abandoned",
         outcome="safety",
-        started_ago=timedelta(hours=1, minutes=10),
-        ran=timedelta(minutes=3),
+        started_ago=timedelta(hours=3, minutes=40),
+        ran=timedelta(minutes=5),
         turns=(
-            opening("Gwen"),
+            opening("Jonas"),
             a(ATTEND),
-            p("Yes, I think so."),
+            p("Yes, I'll be there."),
             a(ESCORT),
+            p("My son's driving me and staying the night."),
+            a(FASTING),
+            p("Nothing after midnight, understood."),
+            a(MEDS),
+            p("Stopped it Monday, yes."),
+            a(HEALTH),
             p(
-                "I don't know. To be honest, sometimes I feel like I want to die.",
+                "Honestly? I'd rather end my life than go through with this operation.",
                 "rf_self_harm",
                 action="end_call",
                 blocked=True,
             ),
             a(SELF_HARM_SAY),
         ),
-        captured={"attendance": "Confirmed"},
+        captured={
+            "attendance": "Confirmed",
+            "escort_home": "Son, driving and staying overnight",
+            "fasting_ack": "Understood",
+            "meds_stopped": "Stopped Monday",
+        },
     ),
     # ── the patient left ─────────────────────────────────────────────────────
     Call(

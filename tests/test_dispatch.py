@@ -150,6 +150,18 @@ async def test_a_request_that_cannot_be_honoured_says_why(live_db, request_):
         await dispatch.create_interview(user(), request_)
 
 
+async def test_a_superseded_protocol_cannot_be_dispatched(live_db):
+    """It is still in the catalog, because the interviews already pinned to it
+    have to run and read. That is not the same as being offerable: a new call
+    goes against the current version, and `OFFERED` is the difference."""
+    from services.agent.config.protocol import OFFERED, PROTOCOLS
+
+    superseded = next(p for p in PROTOCOLS if p not in OFFERED)
+
+    with pytest.raises(dispatch.Refused):
+        await dispatch.create_interview(user(), to(protocol_id=superseded))
+
+
 async def test_nothing_is_written_when_a_dispatch_is_refused(live_db):
     before = await live_db.fetchval("select count(*) from clinical.interviews")
 

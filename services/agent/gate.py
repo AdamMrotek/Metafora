@@ -29,12 +29,14 @@ class SafetyGate(FrameProcessor):
         protocol: ProtocolVersion,
         writer: SessionWriter,
         on_blocked=None,
+        on_turn=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._protocol = protocol
         self._writer = writer
         self._on_blocked = on_blocked
+        self._on_turn = on_turn
         self._closed = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -58,6 +60,14 @@ class SafetyGate(FrameProcessor):
         )
 
         if not result.blocked:
+            # The turn is real and it is about to become context for both
+            # models, so this is where it is counted. A capture with no turn
+            # behind it is a capture of nothing, and the machine refuses it
+            # (`InterviewMachine.authorise`) — which is a rule that needs one
+            # honest place to learn that the patient spoke. This is it, because
+            # every transcript crosses it and a blocked one never gets past.
+            if self._on_turn is not None:
+                self._on_turn()
             await self.push_frame(frame, direction)
             return
 

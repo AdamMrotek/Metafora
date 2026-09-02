@@ -18,7 +18,7 @@ reversed.
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -31,6 +31,18 @@ class CamelModel(BaseModel):
     """
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+# ─── The severity vocabulary ─────────────────────────────────────────────────
+#
+# One list, shared by both blocks that can raise something. A question flag
+# (Block I) and a red flag (Block II) reach the same escalation band, the same
+# `worst_flag` on the review row and the same ranking in `safety.SEVERITY`, so a
+# second vocabulary for *how bad is this* would be a second answer to a question
+# the dashboard has to answer once. The name is Block II's because that is where
+# the record already files it; it is not only Block II's any more.
+
+RedFlagAction = Literal["end_call", "urgent_escalate", "soft_review", "note_only"]
+
 
 # ─── Block I · interview script ──────────────────────────────────────────────
 
@@ -64,6 +76,65 @@ Capture = Annotated[
 ]
 
 
+class QuestionFlag(CamelModel):
+    """A concern that belongs to one question's answer rather than to the call.
+
+    A `RedFlag` scans every turn for a phrase and knows nothing about what was
+    asked, which is why *"No."* to *are you still able to come?* raises nothing:
+    it is a cancellation with no phrase in it to match. This is the other half.
+    It is evaluated once, against the answer to the question it hangs off, so
+    the question supplies the meaning the words do not carry on their own.
+
+    Two triggers, and a flag may declare either or both:
+
+      · `when_value` is one of the values this question's `EnumCapture` already
+        declares. A table lookup — no model, no phrasing, no negation problem.
+        Every condition the enum can express should be written this way.
+      · `when` is a sentence a model judges the answer against, for the ones it
+        cannot: metaphor, indirection, a hedge that is really a refusal.
+
+    Whichever fires, it is the same flag filing the same `id`, so the escalation
+    band never has to tell a lookup from a judgement.
+
+    Note what this is **not**. Block II runs before generation, on every turn,
+    and cannot be talked out of a match. This runs on an answer, after it, and
+    where `when` is doing the work a model's opinion is in the loop. It is a
+    second net under the gate and never a replacement for it.
+    """
+
+    #: Opaque, and filed. A hit is recorded by id and resolved back against the
+    #: version the interview pinned, exactly as a red flag's is — so an id must
+    #: be unique across *both* lists in a version, and renaming one orphans
+    #: everything already filed under it.
+    id: str
+    #: What the clinician reads on the escalation band.
+    label: str
+    #: A value of this question's `EnumCapture`, matched exactly. Deterministic.
+    when_value: str | None = None
+    #: The same condition in words, for what an enum cannot express.
+    when: str | None = None
+    action: RedFlagAction
+    #: Spoken to the patient when this stops the call, and only then. Any other
+    #: action lets the conversation continue, which means the speech pass is
+    #: already generating a reply — a second sentence would race it into the
+    #: same TTS. `test_flag_types.py` holds that line for red flags and for
+    #: these.
+    say: str | None = None
+    #: The answer that must raise it — the question-level counterpart of
+    #: `RedFlag.proving_utterance`, and the same discipline: a flag nobody can
+    #: show firing is a flag nobody can test.
+    proving_answer: str
+
+    @model_validator(mode="after")
+    def _declares_a_trigger(self) -> "QuestionFlag":
+        if self.when_value is None and self.when is None:
+            raise ValueError(
+                f"question flag {self.id!r} declares no trigger: "
+                "set when_value, when, or both"
+            )
+        return self
+
+
 class Question(CamelModel):
     id: str
     #: Spoken to the patient. The only block a patient hears in full.
@@ -77,6 +148,9 @@ class Question(CamelModel):
     if_unclear: str | None = None
     #: A section may be skipped by policy; a question may not.
     must_capture: bool
+    #: What this *answer* may raise. Empty means the Block II gate is the only
+    #: thing watching this question, which is what every v1 question means.
+    flags: list[QuestionFlag] = []
 
 
 class Section(CamelModel):
@@ -90,8 +164,9 @@ class InterviewScript(CamelModel):
 
 
 # ─── Block II · safety break ─────────────────────────────────────────────────
-
-RedFlagAction = Literal["end_call", "urgent_escalate", "soft_review", "note_only"]
+#
+# `RedFlagAction` is declared above Block I, because a question flag is
+# authored at the same three levels this is.
 
 
 class RedFlag(CamelModel):
