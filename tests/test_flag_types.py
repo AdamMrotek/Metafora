@@ -57,6 +57,38 @@ def test_nothing_is_authored_at_a_level_that_is_not_a_level(protocol):
         assert flag.action in TYPES, f"{flag.id} is authored `{flag.action}`"
 
 
+@published
+def test_a_protocol_that_can_raise_an_urgent_authors_what_the_patient_is_told(protocol):
+    """The level's promise is that a clinician will make contact, and the one
+    place that reaches the patient is this sentence. A version that can raise
+    the level and authors none tells them nothing, which is the level claiming
+    something the call does not do.
+
+    Only *can raise*: `WARMUP_V1` carries an `urgent` block and no urgent flag,
+    so it owes nobody a sentence.
+    """
+    flags = list(protocol.red_flags) + [
+        f for s in protocol.script.sections for q in s.questions for f in q.flags
+    ]
+    if not any(f.action == "urgent_escalate" for f in flags):
+        return
+    assert protocol.urgent is not None, f"{protocol.id} raises an urgent and declares no level"
+    assert protocol.urgent.closing, f"{protocol.id} raises an urgent and says nothing about it"
+
+
+@published
+def test_what_the_patient_is_told_promises_contact_and_nothing_else(protocol):
+    """The gate matches phrases and handles no negation, so this sentence is
+    said on false positives too. What it costs must stay bearable: a promise
+    that somebody will be in touch is; anything about what was found is not."""
+    if protocol.urgent is None or not protocol.urgent.closing:
+        return
+    said = protocol.urgent.closing.lower()
+    assert "in touch" in said or "contact" in said, "it has to actually promise contact"
+    for word in ("urgent", "flag", "concern", "risk", "serious", "worried"):
+        assert word not in said, f"{protocol.id} tells the patient it is `{word}`"
+
+
 def test_note_only_survives_in_the_contract():
     """Not authored and deleted are different acts, and this is the first. A
     record written while `note_only` was still authored carries hits at that

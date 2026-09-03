@@ -66,6 +66,25 @@ class OpeningSpoken(_Event):
     ms: float
 
 
+class ClosureSpoken(_Event):
+    """The authored sentence a stopped call ends on.
+
+    `opening.spoken`'s counterpart at the other end of the call, and here for
+    the same reason: both are spoken to the patient without a model generating
+    them, so neither can reach `llm.completed`, which aggregates `LLMTextFrame`s
+    and nothing else. A closure goes out as a `TTSSpeakFrame` — no text frame,
+    no `llm.completed` — and `tts.spoken` carries only `chars` and `chunks`.
+    Without this event the last thing the patient heard is in no record at all,
+    on exactly the calls a clinician reads most closely.
+
+    Written by both paths that speak one: `gate.py`, on a turn the matcher
+    stopped, and `end_call.py`, on a question flag at `end_call`.
+    """
+
+    type: Literal["closure.spoken"] = "closure.spoken"
+    text: str
+
+
 class SafetyScanned(_Event):
     type: Literal["safety.scanned"] = "safety.scanned"
     blocked: bool
@@ -186,6 +205,7 @@ LogEvent = Annotated[
     | PatientJoined
     | TurnCommitted
     | OpeningSpoken
+    | ClosureSpoken
     | SafetyScanned
     | ConcernRaised
     | LlmCompleted

@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from services.agent.safety import scan
-from services.agent.session_log import SafetyScanned, SessionWriter
+from services.agent.session_log import ClosureSpoken, SafetyScanned, SessionWriter
 from shared.contracts.models import ProtocolVersion
 
 
@@ -30,6 +30,7 @@ class SafetyGate(FrameProcessor):
         writer: SessionWriter,
         on_blocked=None,
         on_turn=None,
+        on_urgent=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -37,6 +38,7 @@ class SafetyGate(FrameProcessor):
         self._writer = writer
         self._on_blocked = on_blocked
         self._on_turn = on_turn
+        self._on_urgent = on_urgent
         self._closed = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -60,6 +62,16 @@ class SafetyGate(FrameProcessor):
         )
 
         if not result.blocked:
+            # An urgent the matcher caught. Each hit's own action, not
+            # `result.action`, which is the worst of the turn: on a turn that
+            # matched a yellow and an urgent every hit would inherit the urgent.
+            # Nothing is said now — the call carries on unchanged, and the
+            # sentence this owes is spoken after the goodbye (`end_call.py`).
+            if self._on_urgent is not None and any(
+                hit.flag.action == "urgent_escalate" for hit in result.hits
+            ):
+                self._on_urgent()
+
             # The turn is real and it is about to become context for both
             # models, so this is where it is counted. A capture with no turn
             # behind it is a capture of nothing, and the machine refuses it
@@ -89,6 +101,12 @@ class SafetyGate(FrameProcessor):
         # them.
         if result.say:
             await self.push_frame(TTSSpeakFrame(result.say))
+            # And into the record, because nothing downstream will put it
+            # there: a `TTSSpeakFrame` raises no `LLMTextFrame`, so the sentence
+            # reaches no `llm.completed`. Without this the transcript a
+            # clinician reads ends on the turn that was stopped and never says
+            # what the patient was told about it.
+            self._writer.append(ClosureSpoken(text=result.say))
 
         # Then close, by draining rather than cancelling. Pushing an
         # EndWorkerFrame here tore the pipeline down before the TTS had

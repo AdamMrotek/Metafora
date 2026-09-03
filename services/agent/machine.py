@@ -58,6 +58,13 @@ class InterviewMachine:
         # happened on. See `press`.
         self._pressed: dict[str, int] = {}
 
+        # One bit: an urgent flag fired somewhere in this call. Not a count and
+        # not a list — what it decides is a single sentence at the end, and two
+        # urgent flags owe the patient the same one sentence. Which flags fired
+        # is the record's business (`concern.raised`, `safety.scanned`) and the
+        # escalation band's, not this.
+        self._urgent = False
+
     @property
     def current(self) -> CompiledState | None:
         return self.states[self._index] if self._index < len(self.states) else None
@@ -226,6 +233,24 @@ class InterviewMachine:
                 for value in capture.values:
                     seen[value] = None
         return list(seen)
+
+    def note_urgent(self) -> None:
+        """An urgent flag fired. Set from both nets — `gate.py` for a phrase the
+        matcher caught, `tools.py` for a question flag — because both raise the
+        same level and the patient is owed the same sentence either way."""
+        self._urgent = True
+
+    @property
+    def urgent_closing(self) -> str | None:
+        """The sentence owed at the end of this call, if one is.
+
+        None when no urgent fired, and None when the protocol authors none —
+        a version published before the sentence existed still runs, it just has
+        nothing extra to say.
+        """
+        if not self._urgent or self.protocol.urgent is None:
+            return None
+        return self.protocol.urgent.closing
 
     def flag_ids(self) -> list[str]:
         """Every question flag this protocol authors. The `flag` argument's enum."""

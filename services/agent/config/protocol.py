@@ -639,7 +639,22 @@ PREOP_CHECK_V2 = ProtocolVersion(
     # board, then the clinic's front desk, which is one number belonging to the
     # clinic rather than something a protocol author picks. `timeout_minutes`
     # stays — it is the deadline the dashboard's escalation band draws.
-    urgent=UrgentEscalation(rota=[], timeout_minutes=120),
+    urgent=UrgentEscalation(
+        rota=[],
+        timeout_minutes=120,
+        # Said after the goodbye and nowhere else. Mid-call it would have to
+        # interrupt a question the patient is answering, and it would race the
+        # model's own reply into the same TTS; at the end nothing else is
+        # generating. It promises contact and nothing about the thing itself,
+        # because the gate matches phrases and cannot be right about what it
+        # found — a false positive costs this sentence, which is the most a
+        # false positive may cost.
+        closing=(
+            "One more thing before you go — there's something from what you told me "
+            "that the team will want to look at, so someone from the unit will be in "
+            "touch before your appointment. There's nothing you need to do about it now."
+        ),
+    ),
     soft_review=[],
     # ── Block V ──
     tools=[intake_tool(_PREOP_SCRIPT)],

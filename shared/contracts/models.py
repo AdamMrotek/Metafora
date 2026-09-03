@@ -203,6 +203,16 @@ class UrgentEscalation(CamelModel):
     #: A rota with a timeout, never a person.
     rota: list[str]
     timeout_minutes: int
+    #: What the patient is told when an urgent flag fired: once, after the
+    #: goodbye, never at the time. Authored here rather than on the flag so that
+    #: two urgent flags on one call still produce one sentence — it is a
+    #: statement about the call, not about a match.
+    #:
+    #: Optional, and for two reasons. A protocol that authors no urgent flag has
+    #: nothing to say; and the versions already in `config.protocols` were
+    #: published without it and have to keep loading, because that table is
+    #: append-only and a stored version is what a filed interview reads through.
+    closing: str | None = None
 
 
 class SoftReviewTrigger(CamelModel):

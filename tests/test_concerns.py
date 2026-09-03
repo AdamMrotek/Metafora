@@ -32,6 +32,7 @@ from services.agent.config.protocol import (
 )
 from services.agent.end_call import EndOfInterview
 from services.agent.machine import InterviewMachine
+from services.agent.session_log import ClosureSpoken
 from services.agent.tools import dispatch
 
 STATES = ["s1.q1", "s1.q2", "s2.q1", "s2.q2", "s2.q3", "close.q1"]
@@ -247,6 +248,40 @@ async def test_a_flagged_concern_changes_nothing_about_the_call():
     assert len(stop.results) == 1, "the verdict still arrives — the reply is waiting on it"
     assert machine.current.id == "s1.q2"
     assert raised(writer)[0].action == "soft_review"
+
+
+async def test_an_urgent_question_flag_tells_the_machine_and_nothing_else():
+    """The turn is untouched — no interruption, no change to the question. The
+    one effect is the bit the closing sentence reads at the end of the call."""
+    machine, writer = InterviewMachine(PREOP_CHECK_V2), RecordingWriter()
+    stop = Verdicts()
+    for state in machine.states[:3]:
+        machine.note_turn()
+        machine.capture(state.question.field_key, "said")
+        machine.advance()
+
+    await record(machine, writer, "meds_stopped", "I took one on Tuesday",
+                 answer="still_taking", flag="none", stop=stop)
+
+    assert raised(writer)[-1].action == "urgent_escalate"
+    assert stop.blocked == [], "an urgent stops nothing"
+    assert machine.urgent_closing == PREOP_CHECK_V2.urgent.closing
+
+
+async def test_a_flagged_question_flag_owes_the_patient_nothing():
+    machine, writer = InterviewMachine(PREOP_CHECK_V2), RecordingWriter()
+    await record(machine, writer, "attendance", "I think so, but it's tight",
+                 answer="at_risk", flag="none")
+    assert machine.urgent_closing is None
+
+
+async def test_a_flag_that_stops_the_call_owes_no_promise_of_contact():
+    """`end_call` and `urgent_escalate` on one answer would rank as `end_call`,
+    and the closure that call speaks already says more than this sentence."""
+    machine, writer = InterviewMachine(PREOP_CHECK_V2), RecordingWriter()
+    await record(machine, writer, "attendance", "no, I can't make it",
+                 answer="cannot_attend", flag="qf_attendance_cannot", stop=Verdicts())
+    assert machine.urgent_closing is None
 
 
 async def test_the_value_recorded_is_still_the_patient_s_own_words():
@@ -489,13 +524,118 @@ async def test_the_call_ends_once_the_closure_has_actually_been_spoken(ending):
     assert ("phase", "ended") in wire.calls
 
 
+async def test_the_closure_the_patient_hears_is_in_the_record(ending):
+    """`stop()` files the reason; this files the sentence. Neither is on the
+    speech path — the closure goes out as a `TTSSpeakFrame`, which raises no
+    `LLMTextFrame` — so `llm.completed` never carries it and the transcript a
+    clinician reads would otherwise end on the answer that stopped the call."""
+    end, pushed, writer, _ = ending
+    await end.stop(BlockingResult())
+    assert not [e for e in writer.events if isinstance(e, ClosureSpoken)], (
+        "filed where it is said, not where it is decided"
+    )
+
+    await deliver_queued(end)
+    filed = [e.text for e in writer.events if isinstance(e, ClosureSpoken)]
+    assert filed == spoken(pushed) == ["I'm sorry to hear that. Goodbye."]
+
+
 async def test_a_second_concern_does_not_get_a_second_goodbye(ending):
-    end, pushed, _, _ = ending
+    end, pushed, writer, _ = ending
     await end.stop(BlockingResult())
     await end.stop(BlockingResult())
     await deliver_queued(end)
     assert len(spoken(pushed)) == 1
     assert end.interruptions == [True]
+    assert len([e for e in writer.events if isinstance(e, ClosureSpoken)]) == 1
+
+
+async def complete(machine):
+    """Every question answered, so the goodbye is the only thing left."""
+    for state in list(machine.states):
+        machine.note_turn()
+        machine.capture(state.question.field_key, "said")
+        machine.advance()
+    assert machine.complete
+
+
+async def finish(end):
+    """The goodbye ends, and then whatever follows it does too."""
+    await end.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await end.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await end.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
+
+async def test_an_urgent_call_ends_on_the_authored_promise_of_contact(ending):
+    """Said after the goodbye, not when the flag fired — the call itself is
+    untouched, which is the point of the level."""
+    end, pushed, writer, wire = ending
+    machine = end._machine
+    machine.note_urgent()
+    await complete(machine)
+
+    await end.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    assert spoken(pushed) == [PREOP_CHECK_V2.urgent.closing]
+    assert not [f for f, _ in pushed if isinstance(f, EndWorkerFrame)], (
+        "the call may not hang up before the sentence has been said"
+    )
+
+    await end.process_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    await end.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    assert ("ended", "complete", None) in wire.calls
+    assert [f for f, _ in pushed if isinstance(f, EndWorkerFrame)]
+    assert [e.text for e in writer.events if isinstance(e, ClosureSpoken)] == [
+        PREOP_CHECK_V2.urgent.closing
+    ], "spoken to the patient, so it is in the record like any other closure"
+
+
+async def test_two_urgent_flags_still_owe_one_sentence(ending):
+    """It is a statement about the call, not about a match. That is why it is a
+    bit on the machine and not a `say` on the flag."""
+    end, pushed, _, _ = ending
+    machine = end._machine
+    machine.note_urgent()
+    machine.note_urgent()
+    await complete(machine)
+    await finish(end)
+    assert spoken(pushed) == [PREOP_CHECK_V2.urgent.closing]
+
+
+async def test_a_call_that_raised_only_a_flagged_concern_says_nothing_extra(ending):
+    """`soft_review` is the unit's to decide and the patient is told nothing
+    about it, at the time or after."""
+    end, pushed, _, wire = ending
+    await complete(end._machine)
+    await finish(end)
+    assert spoken(pushed) == []
+    assert ("ended", "complete", None) in wire.calls
+
+
+async def test_a_call_the_concern_stopped_never_promises_a_call_back(ending):
+    """It has already said the protocol's own closure, which says more. Two
+    endings on one call would be the second contradicting the first."""
+    end, pushed, _, _ = ending
+    end._machine.note_urgent()
+    await end.stop(BlockingResult())
+    await deliver_queued(end)
+    await finish(end)
+    assert spoken(pushed) == ["I'm sorry to hear that. Goodbye."]
+
+
+async def test_a_protocol_that_authors_no_sentence_ends_as_it_always_did(ending):
+    """A version published before the sentence existed still runs; it just has
+    nothing extra to say. `config.protocols` is append-only, so those versions
+    are still what filed interviews read through."""
+    end, pushed, _, wire = ending
+    machine = InterviewMachine(WARMUP_V1)
+    machine.note_urgent()
+    end._machine = machine
+    assert machine.urgent_closing is None
+    await complete(machine)
+
+    await end.process_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+    assert spoken(pushed) == []
+    assert ("ended", "complete", None) in wire.calls
 
 
 async def test_a_call_that_raises_nothing_still_ends_the_way_it_always_did(ending):

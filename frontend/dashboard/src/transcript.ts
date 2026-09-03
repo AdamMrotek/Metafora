@@ -3,10 +3,12 @@ import type { TranscriptEvent } from '@metafora/contracts';
 /**
  * `transcript.events` → the two-column transcript the spec draws.
  *
- * The log is not a chat history; it is everything the pipeline did, and three
- * of its fifteen event types carry words:
+ * The log is not a chat history; it is everything the pipeline did, and four
+ * of its seventeen event types carry words:
  *
  *   `opening.spoken`  the sentence the assistant opens with
+ *   `closure.spoken`  the authored sentence a stopped call ends on. Neither
+ *                     bookend is generated, so neither reaches `llm.completed`
  *   `llm.completed`   what the model generated  — `tts.spoken` carries only
  *                     `chars` and `chunks`, so the text has to come from here
  *   `turn.committed`  what the patient actually said, once endpointing decided
@@ -44,7 +46,11 @@ export function lines(events: TranscriptEvent[]): Line[] {
   for (const event of events) {
     const payload = event.payload as Payload;
 
-    if (event.type === 'opening.spoken' || event.type === 'llm.completed') {
+    if (
+      event.type === 'opening.spoken' ||
+      event.type === 'closure.spoken' ||
+      event.type === 'llm.completed'
+    ) {
       const text = str(payload, 'text');
       if (text) out.push({ seq: event.seq, at: event.at, who: 'Assistant', text });
       continue;

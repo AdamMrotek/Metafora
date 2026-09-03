@@ -248,6 +248,14 @@ async def _raise_concerns(
         )
     )
 
+    # Each hit's own action, never `result.action` — that is the worst action of
+    # the whole answer, so an answer raising a soft review and an urgent would
+    # look urgent, and one raising an urgent and an `end_call` would not. The
+    # second is the case that matters: a call the flag stopped speaks its own
+    # authored sentence and must not also promise a call back it has just made.
+    if any(hit.flag.action == "urgent_escalate" for hit in result.hits):
+        machine.note_urgent()
+
     # On every authorised capture, whatever it raised: `EndOfInterview` is what
     # stops the call, and it is reached from here.
     if on_concern is not None:

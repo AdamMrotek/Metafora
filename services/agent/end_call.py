@@ -42,6 +42,15 @@ processor:
 The authored sentence is never generated. It is the protocol's, spoken verbatim,
 for the same reason the gate's is: what a patient hears when a call stops is not
 something a model gets to phrase.
+
+One sentence can also follow the *ordinary* ending. A call on which an urgent
+flag fired owes the patient a promise of contact, and it is said here, after the
+goodbye, rather than when the flag fired: at that moment the model is mid-reply
+and the two would race into the same TTS, whereas once the goodbye has finished
+nothing else is generating. It is one bit on the machine rather than a `say` on
+the flag, so a call carrying two urgent flags still ends on one sentence — and a
+call this processor *stopped* never reaches it, because that call has its own
+authored closure and must not also promise a call back it has just made.
 """
 
 from dataclasses import dataclass
@@ -61,7 +70,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from services.agent.machine import InterviewMachine
-from services.agent.session_log import SessionWriter
+from services.agent.session_log import ClosureSpoken, SessionWriter
 
 
 @dataclass
@@ -101,6 +110,13 @@ class EndOfInterview(FrameProcessor):
         #: its own, and ending on that one would cut off the sentence it was
         #: raised to make room for.
         self._saying = False
+        #: The same pair for the *other* authored sentence — the one an urgent
+        #: flag owes a patient on a call that ran to the end. It is a separate
+        #: pair rather than the same one because the two never happen together
+        #: and mean different things: `_said` is a call this processor stopped,
+        #: `_told` is a call that finished and had something to add.
+        self._told = False
+        self._telling = False
 
     #: What the model says reaches the TTS through here, and while a concern is
     #: stopping the call, none of it does. `LLMFullResponseEndFrame` is in the
@@ -157,6 +173,12 @@ class EndOfInterview(FrameProcessor):
             # before it was ever synthesised.
             await self.broadcast_interruption()
             await self.push_frame(TTSSpeakFrame(self._say))
+            # Filed here rather than in `stop()`, which only decides: this is
+            # the line that actually says it, and a sentence the record holds
+            # but the patient never heard would be the worse of the two lies.
+            # It reaches no `llm.completed` — a `TTSSpeakFrame` raises no text
+            # frame — so without this the transcript has no copy of it.
+            self._writer.append(ClosureSpoken(text=self._say))
             return
 
         await self.push_frame(frame, direction)
@@ -181,13 +203,37 @@ class EndOfInterview(FrameProcessor):
             await self.push_frame(EndWorkerFrame(), FrameDirection.UPSTREAM)
             return
 
-        if not isinstance(frame, BotStoppedSpeakingFrame):
-            return
         if not self._machine.complete:
             return
 
-        # Every question has an answer and the assistant has finished saying
-        # goodbye. There is nothing left for the patient to do.
+        # Every question has an answer. What is left is the goodbye — and then,
+        # only on a call where an urgent flag fired, one more authored sentence.
+        owed = self._machine.urgent_closing
+        if owed is not None and not self._told:
+            if not isinstance(frame, BotStoppedSpeakingFrame):
+                return
+            # Here and nowhere earlier. Nothing is generating at this point, so
+            # this sentence cannot race the model's reply into the same TTS —
+            # which is the whole reason it waits rather than speaking when the
+            # flag fired.
+            self._told = True
+            logger.info("[end] urgent: the patient is told the unit will call")
+            await self.push_frame(TTSSpeakFrame(owed))
+            self._writer.append(ClosureSpoken(text=owed))
+            return
+
+        if self._told:
+            # Its own turn context, so it raises its own speaking frames. Same
+            # wait as the concern path above, for the same reason.
+            if isinstance(frame, BotStartedSpeakingFrame):
+                self._telling = True
+                return
+            if not (self._telling and isinstance(frame, BotStoppedSpeakingFrame)):
+                return
+        elif not isinstance(frame, BotStoppedSpeakingFrame):
+            return
+
+        # There is nothing left for the patient to do.
         self._closed = True
         logger.info("[end] interview complete")
         if self._wire is not None:

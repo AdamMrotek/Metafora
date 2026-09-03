@@ -627,9 +627,11 @@ def _results(call: Call) -> list[tuple[str, str, str, str | None, str]]:
 def _events(call: Call, started: datetime) -> list[tuple]:
     """The call as `transcript.events`, in the order the pipeline writes them.
 
-    Only four of the fifteen event types carry words, and `transcript.ts` reads
-    exactly those; the rest are here because a transcript that opens with the
-    patient already talking does not look like a log of a call.
+    Only five of the seventeen event types carry words, and `transcript.ts`
+    reads exactly those; the rest are here because a transcript that opens with
+    the patient already talking does not look like a log of a call. Four are
+    written here — the fifth, `closure.spoken`, belongs to a call the pipeline
+    itself stopped and has no seeded equivalent.
     """
     if call.status == "queued":
         return []

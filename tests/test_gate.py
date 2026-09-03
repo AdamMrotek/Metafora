@@ -12,9 +12,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 
-from services.agent.config.protocol import WARMUP_V1
+from services.agent.config.protocol import PREOP_CHECK_V2, WARMUP_V1
 from services.agent.gate import SafetyGate
-from services.agent.session_log import SafetyScanned
+from services.agent.session_log import ClosureSpoken, SafetyScanned
 
 
 class RecordingWriter:
@@ -99,6 +99,81 @@ async def test_a_blocked_turn_speaks_the_protocol_sentence_and_ends_the_call(gat
     # The record says "safety", not "pipeline_finished": the reason crosses the
     # boundary on the writer, like every pipeline-initiated end.
     assert writer.ending_reason == "safety"
+
+
+@pytest.fixture
+def preop_gate():
+    """The pre-op protocol, which is the one that authors an urgent phrase.
+    `WARMUP_V1` matches only at `end_call`, so the level cannot be reached
+    through the fixture above."""
+    writer = RecordingWriter()
+    urgent: list = []
+    gate = SafetyGate(PREOP_CHECK_V2, writer, on_urgent=lambda: urgent.append(1))
+    pushed: list = []
+
+    async def capture(frame, direction=FrameDirection.DOWNSTREAM):
+        pushed.append((frame, direction))
+
+    gate.push_frame = capture  # type: ignore[method-assign]
+    return gate, pushed, urgent
+
+
+def _proving(action: str) -> str:
+    return next(f.proving_utterance for f in PREOP_CHECK_V2.red_flags if f.action == action)
+
+
+async def test_an_urgent_phrase_reports_upward_without_touching_the_turn(preop_gate):
+    """The level's whole definition: the call carries on unchanged, and what it
+    owes the patient is one sentence after the goodbye (`end_call.py`)."""
+    gate, pushed, urgent = preop_gate
+    await gate.process_frame(
+        transcription(_proving("urgent_escalate")), FrameDirection.DOWNSTREAM
+    )
+
+    assert urgent == [1], "the machine is told once"
+    assert [f for f, _ in pushed if isinstance(f, TranscriptionFrame)], (
+        "the turn still reaches the model — an urgent stops nothing"
+    )
+    assert not [f for f, _ in pushed if isinstance(f, TTSSpeakFrame)], (
+        "and nothing is said at the time"
+    )
+
+
+async def test_a_flagged_phrase_reports_nothing_upward(preop_gate):
+    """`soft_review` is the unit's to decide. The patient is told nothing."""
+    gate, _, urgent = preop_gate
+    await gate.process_frame(transcription(_proving("soft_review")), FrameDirection.DOWNSTREAM)
+    assert urgent == []
+
+
+async def test_a_stopped_turn_reports_no_urgent(preop_gate):
+    """The call is ending on its own authored sentence, which says more than a
+    promise of contact and must not be followed by one."""
+    gate, _, urgent = preop_gate
+    await gate.process_frame(transcription(_proving("end_call")), FrameDirection.DOWNSTREAM)
+    assert urgent == []
+
+
+async def test_the_sentence_a_blocked_turn_speaks_is_in_the_record(gate_and_pushed):
+    """The closure is a `TTSSpeakFrame`, which raises no `LLMTextFrame`, so it
+    reaches no `llm.completed` — and `tts.spoken` carries counts, not words.
+    Without its own event the transcript a clinician reads ends on the turn that
+    was stopped and never says what the patient was told about it."""
+    gate, pushed, writer = gate_and_pushed
+    await gate.process_frame(
+        transcription("sometimes I feel like I want to die"), FrameDirection.DOWNSTREAM
+    )
+
+    spoken = [f.text for f, _ in pushed if isinstance(f, TTSSpeakFrame)]
+    filed = [e.text for e in writer.events if isinstance(e, ClosureSpoken)]
+    assert filed == spoken, "the record holds exactly what was said, and only that"
+
+
+async def test_a_turn_that_does_not_trip_files_no_closure(gate_and_pushed):
+    """Nothing was spoken, so nothing is claimed to have been."""
+    gate, _, writer = gate_and_pushed
+    await gate.process_frame(transcription("fine thanks"), FrameDirection.DOWNSTREAM)
+    assert not [e for e in writer.events if isinstance(e, ClosureSpoken)]
 
 
 async def test_every_turn_is_logged_whether_or_not_it_trips(gate_and_pushed):

@@ -260,7 +260,13 @@ def build_bot(
             stt,
             # Before the context, before the model. This is the ordering the
             # whole in-the-media-path argument buys.
-            SafetyGate(protocol, writer, on_blocked=on_blocked, on_turn=machine.note_turn),
+            SafetyGate(
+                protocol,
+                writer,
+                on_blocked=on_blocked,
+                on_turn=machine.note_turn,
+                on_urgent=machine.note_urgent,
+            ),
             # After the gate, so a blocked transcript never ends a turn and so
             # never reaches the model.
             turn,
