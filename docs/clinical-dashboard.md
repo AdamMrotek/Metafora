@@ -109,18 +109,18 @@ Add patient, the Deployments screen, and the band's own action. A control that
 cannot honour what it offers is worse than one that plainly is not offering it
 yet.
 
+**Live, since Phase 5.** Dispatch (the Deployments screen, `CopyLink.tsx`), the
+band's acknowledge action, and — since 5c — the composer's impression,
+disposition and Sign: `POST /interviews/{id}/signature` pins a real hash to a
+real chain in `clinical.signatures`, the Ledger tab renders it, and the
+timeline's `signed` pill reads the record rather than a hash `demo.ts` made up.
+See `docs/phase-5-roadmap.md`.
+
 ## What it still needs
 
 - **A push channel for escalations** — the band claims seconds and currently
-  learns about one when the page loads. Phase 5: `clinical.escalations` and an
-  SSE stream from `svc-core`, scoped by the same `where` clause as the read
-  routes.
-- **Dispatch** — `POST /interviews`, `clinical.invitations`, and the emailed
-  link. It is also the only thing that ever sets `clinician_email`, which is the
-  column every scope in `reads.py` turns on; until it exists, a caseload is the
-  unowned demo rows.
-- **A signature ledger** — the composer's hash and ledger head imply
-  append-only, tamper-evident storage that does not exist.
+  learns about one when the page loads. 5b·2, unbuilt: an SSE stream from
+  `svc-core`, scoped by the same `where` clause as the read routes.
 - **A patient profile screen** — the patients table's arrow opens that person's
   most recent interview, because there is nowhere else for it to go.
 

@@ -7,12 +7,13 @@ role at the door and then runs an unscoped query has no place to put the second
 one when it is needed. Today the scope is one predicate (`OWNED_BY`); when it
 becomes a relationship it becomes a longer predicate in the same place.
 
-Reads only. The writers are named and there are five of them: `store.py` closes
+Reads only. The writers are named and there are six of them: `store.py` closes
 an interview and records what it captured, `queue.py` claims one, `dispatch.py`
-creates one, `invitations.py` mints and spends its link, and
-`acknowledgements.py` stamps the one column that says a human has taken a red
-flag. Nothing in this file writes, and the dashboard reaches the last three
-through their own routes rather than through a query here.
+creates one, `invitations.py` mints and spends its link, `acknowledgements.py`
+stamps the one column that says a human has taken a red flag, and `ledger.py`
+signs one, irreversibly. Nothing in this file writes, and the dashboard
+reaches the last four through their own routes rather than through a query
+here.
 """
 
 from typing import Any
@@ -33,6 +34,7 @@ from shared.contracts.models import (
     PatientSummary,
     ProtocolOption,
     ResultField,
+    Signature,
     TranscriptEvent,
 )
 
@@ -123,7 +125,8 @@ _SUMMARY_COLUMNS = """
     i.scheduled_for,
     i.started_at,
     i.ended_at,
-    i.created_at
+    i.created_at,
+    sig.signed_at
 """
 
 #: The review table draws a "9/16 captured" meter on every row. Counting it
@@ -283,6 +286,10 @@ _SUMMARY_FROM = f"""
                on flag.value ->> 'id' = hit
         where e.interview_id = i.id and e.type in {_FLAGGING}
     ) g on true
+    -- Whether this call is signed, for the timeline strip's `signed` pill.
+    -- `clinical.signatures` is at most one row per interview, so a plain left
+    -- join costs nothing a lateral one would have saved.
+    left join clinical.signatures sig on sig.interview_id = i.id
 """
 
 
@@ -588,6 +595,12 @@ async def interview(user: CurrentUser, interview_id: str) -> InterviewDetail:
         "where interview_id = $1 order by seq",
         interview_id,
     )
+    sig = await pool.fetchrow(
+        "select interview_id, prev_hash, record_hash, hash, issued_summary, "
+        "impression, disposition, signed_by, signed_at "
+        "from clinical.signatures where interview_id = $1",
+        interview_id,
+    )
     return InterviewDetail(
         interview=row,
         results=[ResultField.model_validate(dict(r)) for r in results],
@@ -597,6 +610,7 @@ async def interview(user: CurrentUser, interview_id: str) -> InterviewDetail:
         # list, which meant opening an interview directly — a bookmark, a link
         # in a message — drew no history until the list happened to arrive.
         history=await history(user, row.patient_id),
+        signature=Signature.model_validate(dict(sig)) if sig else None,
     )
 
 

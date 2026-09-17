@@ -1,16 +1,16 @@
-"""The clinician's read of the record, and the three writes onto it.
+"""The clinician's read of the record, and the four writes onto it.
 
 All behind `require_role`, and all handing the identity on to `reads.py`,
-`dispatch.py` or `acknowledgements.py` rather than stopping at the door with
-it. The writes live here rather than in a router of their own so that they
-inherit the same standing guard the reads do: a file split by *audience* keeps
-that property, and a file split by verb would not.
+`dispatch.py`, `acknowledgements.py` or `ledger.py` rather than stopping at the
+door with it. The writes live here rather than in a router of their own so
+that they inherit the same standing guard the reads do: a file split by
+*audience* keeps that property, and a file split by verb would not.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from services.agent.config.protocol import OFFERED
-from services.core import acknowledgements, dispatch, invitations, reads
+from services.core import acknowledgements, dispatch, invitations, ledger, reads
 from services.core.db import pool
 from shared.auth import READS_THE_RECORD, ClinicalReader, require_role
 from shared.contracts.models import (
@@ -23,6 +23,8 @@ from shared.contracts.models import (
     Invitation,
     Overview,
     ProtocolOption,
+    Signature,
+    SignatureRequest,
 )
 
 # The guard is declared twice on purpose. On the router it is the standing
@@ -184,3 +186,40 @@ async def acknowledge_interview(
         return await acknowledgements.acknowledge(user, interview_id)
     except reads.NotFound as exc:
         raise HTTPException(404, f"no interview {interview_id}") from exc
+
+
+@router.post("/interviews/{interview_id}/signature")
+async def sign_interview(
+    interview_id: str,
+    body: SignatureRequest,
+    user: ClinicalReader,
+) -> Signature:
+    """Sign this interview, irreversibly, pinned to the ledger's head.
+
+    409 for a second attempt — unlike the acknowledgement, this is not
+    idempotent: answering 200 with the first signature would tell a caller
+    their own sign-off happened when it did not. 400 for a call that has not
+    ended, because its own record is still being written under it.
+    """
+    try:
+        return await ledger.sign(user, interview_id, body)
+    except reads.NotFound as exc:
+        raise HTTPException(404, f"no interview {interview_id}") from exc
+    except ledger.AlreadySigned as exc:
+        raise HTTPException(409, "this interview is already signed") from exc
+    except ledger.NotReady as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/interviews/{interview_id}/ledger")
+async def get_ledger(interview_id: str, user: ClinicalReader) -> Signature:
+    """The signature for this interview, read back exactly as it was written —
+    what the composer already carries on `InterviewDetail.signature`, fetched
+    on its own so a signed hash can be re-checked independently of the rest of
+    the screen."""
+    try:
+        return await ledger.ledger(user, interview_id)
+    except reads.NotFound as exc:
+        raise HTTPException(404, f"no interview {interview_id}") from exc
+    except ledger.NotSigned as exc:
+        raise HTTPException(404, "this interview has not been signed") from exc

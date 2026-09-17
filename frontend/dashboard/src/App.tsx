@@ -23,15 +23,15 @@ export function App({ account, onSignOut }: { account: Account; onSignOut: () =>
       <div className="app">
         <Chrome account={account} onSignOut={onSignOut} />
         <Rail />
-        <Screen />
+        <Screen account={account} />
       </div>
     </RecordProvider>
   );
 }
 
-function Screen() {
+function Screen({ account }: { account: Account }) {
   const route = useRoute();
-  if (route.name === 'interview') return <Interview id={route.id} />;
+  if (route.name === 'interview') return <Interview id={route.id} signer={account.displayName} />;
   if (route.name === 'patients') return <Patients />;
   if (route.name === 'deployments') return <Deployments />;
   return <Dashboard />;
@@ -60,7 +60,7 @@ function Chrome({ account, onSignOut }: { account: Account; onSignOut: () => voi
       <span className="grow" />
       <span
         className="demo-chip"
-        title="Synthetic patients, on NHS test numbers. Three things are still drawn rather than recorded: the referral reason, the consent chip and the ledger hashes."
+        title="Synthetic patients, on NHS test numbers. Two things are still drawn rather than recorded: the referral reason and the consent chip."
       >
         demo data
       </span>

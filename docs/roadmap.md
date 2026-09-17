@@ -22,6 +22,11 @@ where they run.
 - **Deploy — Phase 3, below.** Live since 2026-08-27 and proven by a real call.
 - **Clinician dashboard — Phase 4, below.** The record is now read by the person it is
   for. Live since 2026-08-28; dispatch — the screen that *writes* one — is Phase 5.
+- **Dispatch, escalations and sign-off — Phase 5, below.** Staged in
+  [`phase-5-roadmap.md`](./phase-5-roadmap.md), which is the current record of what shipped and
+  what departed from this section's plan. Dispatch, the acknowledgement, the three issue types
+  and the signature ledger are shipped; live push to an open dashboard and the model as a second
+  detector are not — neither is on the MVP line below, which now runs end to end.
 
 ---
 
@@ -303,6 +308,10 @@ deployed dashboard itself.
 ---
 
 ## 5 · Call dispatch + close the loop — MVP
+
+*Status: see [`phase-5-roadmap.md`](./phase-5-roadmap.md) for what actually shipped and where it
+departed from the plan below — this section is the plan as it stood before any of Phase 5 was
+built.*
 
 *Why now:* the link replaces the ephemeral demo path with real dispatch, and because Phase 1
 already claims the row, this is a lookup rather than a rewrite. Everything the MVP line promises —

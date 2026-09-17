@@ -236,6 +236,12 @@ export interface InterviewSummary {
   startedAt: string | null;
   endedAt: string | null;
   createdAt: string;
+  /** Null until `POST /interviews/{id}/signature`. On the summary rather than */
+  /** behind `InterviewDetail.signature` because the timeline strip draws a */
+  /** `signed` pill on every past interview it lists, and that strip is a list */
+  /** of summaries — a detail fetch per node would be one request per call a */
+  /** patient has ever had. */
+  signedAt: string | null;
 }
 
 /**
@@ -373,6 +379,39 @@ export interface TranscriptEvent {
 }
 
 /**
+ * The composer's two live fields — everything a clinician actually types.
+ *
+ * `issued_summary` is not here: it is composed by the server from columns a
+ * read already produced, never accepted from the client, so a signature
+ * cannot be made to attest to a sentence nobody's query can reproduce.
+ */
+export interface SignatureRequest {
+  impression: string;
+  disposition: Disposition;
+}
+
+/**
+ * One link of the ledger — what signing an interview writes, and what
+ * `GET /interviews/{id}/ledger` reads back.
+ *
+ * `hash = sha256(prev_hash ‖ record_hash ‖ impression ‖ disposition ‖
+ * signed_by ‖ signed_at)`, and `prev_hash` is the previous signature's `hash`
+ * — or 64 zeros for the first one ever signed. `record_hash` is the
+ * interview's own state at the moment of signing: see `ledger.py`.
+ */
+export interface Signature {
+  interviewId: string;
+  prevHash: string;
+  recordHash: string;
+  hash: string;
+  issuedSummary: string;
+  impression: string;
+  disposition: Disposition;
+  signedBy: string;
+  signedAt: string;
+}
+
+/**
  * One interview, everything about it, in one request.
  *
  * The transcript carries **every** safety scan, including the ones that
@@ -389,6 +428,12 @@ export interface InterviewDetail {
   /** directly from a bookmark draws the same screen as reaching it from the */
   /** table. */
   history: InterviewSummary[];
+  /** Null until the interview is signed. On its own field rather than folded */
+  /** into `interview` because it is the one thing here with its own writer */
+  /** and its own route (`GET /interviews/{id}/ledger`) — this is the copy */
+  /** fetched alongside everything else so the composer does not need a */
+  /** second request to know whether it is looking at a signed record. */
+  signature: Signature | null;
 }
 
 /**
@@ -552,6 +597,8 @@ export type InterviewStatus = 'queued' | 'running' | 'completed' | 'abandoned';
 export type PatientOrigin = 'demo' | 'dispatched';
 
 export type InterviewSort = 'urgency' | 'recent';
+
+export type Disposition = 'same_day' | 'routine_review' | 'no_action' | 'referred_on';
 
 export type InvitationChannel = 'link' | 'email';
 

@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { InterviewDetail, InterviewSummary, ResultField } from '@metafora/contracts';
-import { get } from '../api.ts';
+import type {
+  Disposition,
+  InterviewDetail,
+  InterviewSummary,
+  ResultField,
+  Signature,
+} from '@metafora/contracts';
+import { get, post } from '../api.ts';
 import * as demo from '../demo.ts';
-import { dob, gap, nhsMasked, outcome, stamp, statusPill } from '../format.ts';
+import { dob, gap, hashPreview, nhsMasked, outcome, stamp, statusPill } from '../format.ts';
 import { Link } from '../router.tsx';
 import { lines } from '../transcript.ts';
 
@@ -12,11 +18,11 @@ import { lines } from '../transcript.ts';
  * Two panes. Left, the transcript, with every safety scan that ran shown
  * against the turn it ran on — **including the ones that matched nothing**,
  * because that is the only evidence on any screen that the gate ran on a turn
- * it cleared. Right, the review composer, read-only: the impression, the
- * disposition and the signature are Phase 5, and a form that accepts input it
- * cannot store is worse than one that plainly does not yet.
+ * it cleared. Right, the review composer: live until signed, then read-only —
+ * signing is irreversible, and a form that still accepted input after would be
+ * lying about that.
  */
-export function Interview({ id }: { id: string }) {
+export function Interview({ id, signer }: { id: string; signer: string }) {
   const [detail, setDetail] = useState<InterviewDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,6 +76,22 @@ export function Interview({ id }: { id: string }) {
   const history = detail.history;
   const born = dob(row.patientDateOfBirth);
 
+  // The screen updates the instant a signature lands rather than waiting on a
+  // reload — the composer locks, the Ledger tab opens, and the strip's own
+  // pill for this call turns `signed`, all from one response.
+  function onSigned(signature: Signature) {
+    setDetail((prev) => {
+      if (!prev) return prev;
+      const signed = { ...prev.interview, signedAt: signature.signedAt };
+      return {
+        ...prev,
+        signature,
+        interview: signed,
+        history: prev.history.map((h) => (h.id === signed.id ? signed : h)),
+      };
+    });
+  }
+
   return (
     <>
       <div className="crumb">
@@ -103,6 +125,7 @@ export function Interview({ id }: { id: string }) {
           </span>
           <span className={pill.kind ? `pill pill--${pill.kind}` : 'pill'}>
             {pill.kind === 'danger' && <span className="pill__d" />}
+            {pill.kind === 'done' && <span className="chk">✓</span>}
             {pill.label}
           </span>
         </span>
@@ -115,7 +138,16 @@ export function Interview({ id }: { id: string }) {
 
       <div className={opening ? 'panes is-stale' : 'panes'} aria-busy={opening}>
         <Transcript detail={detail} />
-        <Composer detail={detail} summary={said.title} />
+        {/* Keyed by the interview: the composer holds its own draft impression
+            and disposition in local state, and without a key React would carry
+            one interview's unsent draft into the next one the strip opens. */}
+        <Composer
+          key={row.id}
+          detail={detail}
+          summary={said.title}
+          signer={signer}
+          onSigned={onSigned}
+        />
       </div>
     </>
   );
@@ -171,6 +203,7 @@ function Timeline({
             <span className="tl__p">{row.protocolLabel}</span>
             <span className={pill.kind ? `pill pill--${pill.kind}` : 'pill'}>
               {pill.kind === 'danger' && <span className="pill__d" />}
+              {pill.kind === 'done' && <span className="chk">✓</span>}
               {pill.label}
             </span>
           </>
@@ -199,7 +232,7 @@ function Timeline({
                 {body}
               </Link>
             )}
-            {now && <span className="tl__owed">Awaiting your review</span>}
+            {now && !row.signedAt && <span className="tl__owed">Awaiting your review</span>}
           </span>
         );
       })}
@@ -208,9 +241,10 @@ function Timeline({
 }
 
 function Transcript({ detail }: { detail: InterviewDetail }) {
-  const [tab, setTab] = useState<'transcript' | 'record'>('transcript');
+  const [tab, setTab] = useState<'transcript' | 'record' | 'ledger'>('transcript');
   const spoken = lines(detail.events);
   const captured = detail.results.filter((r) => r.status === 'captured').length;
+  const signature = detail.signature;
 
   return (
     <div className="pane">
@@ -231,8 +265,15 @@ function Transcript({ detail }: { detail: InterviewDetail }) {
         >
           Record {captured}/{detail.results.length}
         </span>
-        {/* Phase 5 and later: `clinical.signatures` and audio retention. */}
-        <span className="tab is-inert" title="The signature ledger arrives in Phase 5">
+        <span
+          className={
+            !signature ? 'tab is-inert' : tab === 'ledger' ? 'tab tab--on' : 'tab'
+          }
+          role={signature ? 'button' : undefined}
+          tabIndex={signature ? 0 : undefined}
+          onClick={() => signature && setTab('ledger')}
+          title={signature ? undefined : 'Sign this interview to add it to the ledger'}
+        >
           Ledger
         </span>
         <span className="tab is-inert" title="Audio retention is not built">
@@ -242,6 +283,8 @@ function Transcript({ detail }: { detail: InterviewDetail }) {
 
       {tab === 'record' ? (
         <Record results={detail.results} />
+      ) : tab === 'ledger' ? (
+        signature && <Ledger signature={signature} />
       ) : spoken.length === 0 ? (
         <p className="note">
           <b>Nothing was said</b>
@@ -296,21 +339,92 @@ function Record({ results }: { results: ResultField[] }) {
   );
 }
 
+/** The Ledger tab: one signature, read back exactly as it was written. Only
+ *  ever rendered once `detail.signature` exists, so it draws real hashes and
+ *  nothing from `demo.ts`. */
+function Ledger({ signature }: { signature: Signature }) {
+  return (
+    <div className="cmp__b">
+      <span>
+        <span className="fld__l">Signed by</span>
+        <span className="fld__v fld__v--ro">
+          {signature.signedBy} · {stamp(signature.signedAt)}
+        </span>
+      </span>
+      <span>
+        <span className="fld__l">Disposition</span>
+        <span className="fld__v fld__v--ro">{signature.disposition}</span>
+      </span>
+      <span>
+        <span className="fld__l">Clinical impression</span>
+        <span className="fld__v fld__v--ro">{signature.impression}</span>
+      </span>
+      <span>
+        <span className="fld__l">Issued summary</span>
+        <span className="fld__v fld__v--ro">{signature.issuedSummary}</span>
+      </span>
+      <span>
+        <span className="fld__l">Chain</span>
+        <span className="fld__v fld__v--ro">
+          {hashPreview(signature.prevHash)} → {hashPreview(signature.hash)}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 /**
- * The review composer, read-only.
+ * The review composer.
  *
- * `docs/roadmap.md` §4 is the read path, and every control here writes: the
- * impression, the disposition and the Sign that pins a record hash to a ledger
- * head. `clinical.signatures` and its append-only `(prev_hash, record_hash,
- * hash)` chain are Phase 5, so the hashes below are shaped like what will
- * replace them and are otherwise `demo.ts`. Sign is disabled rather than
- * hidden, because the shape of the act is the argument this screen is making.
+ * Live until signed, then read-only. `docs/roadmap.md` §4 is the read path,
+ * and every control here writes: `POST /interviews/{id}/signature` pins a
+ * record hash to the ledger's head, irreversibly, so the form locks the
+ * instant it succeeds rather than staying open on a sentence that has
+ * already been signed.
+ *
+ * The issued summary is two different sentences depending on whether it has
+ * been. Before signing it is a live preview, and it may say what the call was
+ * *for* — `demo.referral`, this product's one invented context — because
+ * nothing here has been committed yet. After signing it is
+ * `signature.issuedSummary`, composed server-side from columns a query
+ * produced and nothing else: the one paragraph this repo makes irreversible
+ * does not get to repeat an invented clause.
  */
-function Composer({ detail, summary }: { detail: InterviewDetail; summary: string }) {
+function Composer({
+  detail,
+  summary,
+  signer,
+  onSigned,
+}: {
+  detail: InterviewDetail;
+  summary: string;
+  signer: string;
+  onSigned: (signature: Signature) => void;
+}) {
   const row = detail.interview;
-  const hashes = demo.hashes(row.id);
+  const signature = detail.signature;
   const captured = detail.results.filter((r) => r.status === 'captured').length;
   const born = dob(row.patientDateOfBirth);
+  const finished = row.status === 'completed' || row.status === 'abandoned';
+
+  const [impression, setImpression] = useState('');
+  const [disposition, setDisposition] = useState<Disposition>('same_day');
+  const [signing, setSigning] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+
+  async function sign() {
+    setSigning(true);
+    setRefused(null);
+    try {
+      onSigned(
+        await post<Signature>(`/interviews/${row.id}/signature`, { impression, disposition }),
+      );
+    } catch (error) {
+      setRefused((error as Error).message);
+    } finally {
+      setSigning(false);
+    }
+  }
 
   return (
     <div className="cmp">
@@ -319,11 +433,17 @@ function Composer({ detail, summary }: { detail: InterviewDetail; summary: strin
         <span>
           <span className="fld__l">Issued summary · composed from the record</span>
           <span className="fld__v fld__v--ro">
-            {born.age !== null && `${born.age}-year-old, `}
-            {row.protocolLabel.toLowerCase()} for {demo.referral(row.patientId)}.{' '}
-            {summary}
-            {row.endedAt ? ` at ${stamp(row.endedAt)}` : ''}; {captured} of {detail.results.length}{' '}
-            declared items captured.
+            {signature ? (
+              signature.issuedSummary
+            ) : (
+              <>
+                {born.age !== null && `${born.age}-year-old, `}
+                {row.protocolLabel.toLowerCase()} for {demo.referral(row.patientId)}.{' '}
+                {summary}
+                {row.endedAt ? ` at ${stamp(row.endedAt)}` : ''}; {captured} of{' '}
+                {detail.results.length} declared items captured.
+              </>
+            )}
           </span>
         </span>
         <span>
@@ -331,26 +451,53 @@ function Composer({ detail, summary }: { detail: InterviewDetail; summary: strin
           <textarea
             className="fld__v fld__v--type"
             rows={3}
-            placeholder="Writing back to the record arrives with the signature ledger."
-            disabled
+            value={signature ? signature.impression : impression}
+            onChange={(e) => setImpression(e.target.value)}
+            placeholder="What did you make of this call?"
+            disabled={!!signature || !finished}
           />
         </span>
         <span>
           <span className="fld__l">Disposition</span>
-          <select className="fld__v" disabled>
-            <option>same_day</option>
+          <select
+            className="fld__v"
+            value={signature ? signature.disposition : disposition}
+            onChange={(e) => setDisposition(e.target.value as Disposition)}
+            disabled={!!signature || !finished}
+          >
+            <option value="same_day">same_day</option>
+            <option value="routine_review">routine_review</option>
+            <option value="no_action">no_action</option>
+            <option value="referred_on">referred_on</option>
           </select>
         </span>
       </div>
       <div className="sig">
         <span className="sig__h">
-          record {hashes.record} · ledger head {hashes.head}
+          {signature
+            ? `record ${hashPreview(signature.recordHash)} · ledger head ${hashPreview(signature.hash)}`
+            : finished
+              ? 'Signing pins a hash of this record to the ledger'
+              : 'A call has to finish before it can be signed'}
         </span>
         <div className="sig__r">
-          <span className="sig__note">Signing is irreversible</span>
-          <button className="btn-grad" type="button" disabled title="Sign-off arrives in Phase 5">
-            Sign
-          </button>
+          {signature ? (
+            <span className="sig__note">
+              Signed by {signature.signedBy} · {stamp(signature.signedAt)}
+            </span>
+          ) : (
+            <>
+              <span className="sig__note">{refused ?? 'Signing is irreversible'}</span>
+              <button
+                className="btn-grad"
+                type="button"
+                disabled={signing || !finished || impression.trim().length === 0}
+                onClick={sign}
+              >
+                {signing ? 'Signing…' : `Sign as ${signer}`}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

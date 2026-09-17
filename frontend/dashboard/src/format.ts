@@ -206,9 +206,13 @@ function narrate(row: InterviewSummary): Outcome {
   return { title: 'Issue raised', detail: `${row.outcome ?? 'no outcome recorded'} · ${captured}`, urgent: false };
 }
 
-export type PillKind = 'danger' | 'accent' | 'warn' | 'faint' | '';
+export type PillKind = 'danger' | 'accent' | 'warn' | 'faint' | 'done' | '';
 
 export function statusPill(row: InterviewSummary): { label: string; kind: PillKind } {
+  // Signed outranks everything below it: it is a statement about who is
+  // accountable for the call, not about how it went, and a signed row that
+  // still read `urgent review` would look like nobody had acted on it.
+  if (row.signedAt) return { label: 'signed', kind: 'done' };
   // Red first, and from the flag rather than the ending — `outcome === 'safety'`
   // stays because a stopped call is red even if its scan rows are unreadable,
   // but it is no longer the only way in. Yellow below is now what it says it
@@ -243,6 +247,13 @@ const BORN = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
   timeZone: 'UTC',
 });
+
+/** A hash, shown the way the composer draws one: first four hex characters, an
+ *  ellipsis, last four. The full value is the one that actually verifies —
+ *  this is what a human glances at beside it. */
+export function hashPreview(hex: string): string {
+  return `${hex.slice(0, 4)}…${hex.slice(-4)}`;
+}
 
 /** A date of birth as the header draws it, and the age it implies.
  *

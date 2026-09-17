@@ -1,11 +1,13 @@
 """The store schema, exercised against a real Postgres.
 
-Two of these tables carry a promise that no amount of careful calling can keep:
-`config.protocols` is immutable so a captured field can always be read back
-against the question that produced it, and `transcript.events` is append-only
-because the record of a call does not change. Both are enforced by trigger, and
-a trigger is exactly the kind of thing a later migration drops by accident —
-so it is asserted here rather than assumed.
+Three of these tables carry a promise that no amount of careful calling can
+keep: `config.protocols` is immutable so a captured field can always be read
+back against the question that produced it, `transcript.events` is
+append-only because the record of a call does not change, and
+`clinical.signatures` is append-only because a signature is not corrected, it
+is superseded. All three are enforced by trigger, and a trigger is exactly the
+kind of thing a later migration drops by accident — so each is asserted here
+rather than assumed.
 
 Phase 2 adds a third of the same kind. `clinical.patients.clinician_email`
 references `config.accounts`, which is what stops a caseload being assigned to
@@ -326,3 +328,88 @@ async def test_an_invitation_can_be_spent(db):
     assert await db.fetchval(
         "select opened_at from clinical.invitations where id = 'inv_1'"
     ) is not None
+
+
+# ─── clinical.signatures ─────────────────────────────────────────────────────
+#
+# Phase 5c. The signature is the one write in this repo that has to be
+# irreversible for what it claims to mean anything — "who is accountable for
+# this record" is not a fact a later `update` gets to quietly move.
+
+
+async def a_signature(db, suffix: str = "1", **columns) -> None:
+    signer = await db.fetchval("select email from config.accounts where role = 'clinician' limit 1")
+    values = {
+        "id": f"sig_{suffix}",
+        "interview_id": "iv_0001",
+        "prev_hash": f"prev-{suffix}".rjust(64, "0"),
+        "record_hash": f"record-{suffix}".rjust(64, "0"),
+        "hash": f"hash-{suffix}".rjust(64, "0"),
+        "issued_summary": "a synthetic summary",
+        "impression": "a synthetic impression",
+        "disposition": "same_day",
+        "signed_by": signer,
+        **columns,
+    }
+    names = ", ".join(values)
+    placeholders = ", ".join(f"${i}" for i in range(1, len(values) + 1))
+    await db.execute(
+        f"insert into clinical.signatures ({names}) values ({placeholders})", *values.values()
+    )
+
+
+async def test_a_signature_needs_an_interview(db):
+    await seed(db)
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await a_signature(db, interview_id="iv_missing")
+
+
+async def test_a_signature_needs_a_granted_account(db):
+    """The same foreign key as `acknowledged_by`, for the same reason: a
+    signature naming an address nobody granted a caseload to is worth nothing."""
+    await seed(db)
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await a_signature(db, signed_by="ghost@example.test")
+
+
+async def test_an_interview_cannot_be_signed_twice(db):
+    """`interview_id unique` — the schema's half of `ledger.AlreadySigned`."""
+    await seed(db)
+    await a_signature(db)
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await a_signature(db, "2")
+
+
+async def test_the_chain_cannot_fork(db):
+    """`prev_hash unique` — two signatures both claiming the same predecessor
+    is exactly what a fork is."""
+    await seed(db)
+    await a_signature(db)
+    await db.execute(
+        "insert into clinical.interviews (id, protocol_id, patient_id) "
+        "values ('iv_0002', 'pv_1', 'pt_1')"
+    )
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await a_signature(db, "2", interview_id="iv_0002", prev_hash="prev-1".rjust(64, "0"))
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "update clinical.signatures set impression = 'edited' where id = 'sig_1'",
+        "delete from clinical.signatures where id = 'sig_1'",
+    ],
+)
+async def test_a_signature_cannot_be_changed(db, sql):
+    await seed(db)
+    await a_signature(db)
+    with pytest.raises(Exception, match="append-only"):
+        await db.execute(sql)
+
+
+async def test_the_ledger_head_is_seeded_as_one_row(db):
+    """Seeded by the migration, not by the application — the same rule as
+    `config.accounts`, so there is always something for the first signature
+    ever to point at. Not asserting its value: `tests/test_ledger.py` commits
+    real signatures against this same scratch database and moves it."""
+    assert await db.fetchval("select count(*) from clinical.ledger_head") == 1

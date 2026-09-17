@@ -15,14 +15,16 @@ order the MVP line needs them (deploy → intake →
 return → review → sign). 5·0 is the odd one out and is **shipped**: it depends on none of the
 others and was the cheapest way to shrink `demo.ts`, which every later stage otherwise inherits.
 
-**5·0, 5a and 5b are shipped.** `clinical.patients.clinician_email` is written, so the scope
-predicate in `reads.py` discriminates; `clinical.interviews.acknowledged_at` is the second such
-predicate, and 5c is built on both.
+**5·0, 5a, 5b, 5b·1 and 5c are shipped.** `clinical.patients.clinician_email` is written, so the
+scope predicate in `reads.py` discriminates; `clinical.interviews.acknowledged_at` is the second
+such predicate, and 5c's `clinical.signatures` and `clinical.ledger_head` are built on both.
+Outstanding: 5b·2 (live push) and 5b·3 (the model as second detector) — neither blocks the MVP
+line, which now runs end to end: dispatch → intake → return → review → **sign**.
 
-**5b was three jobs and is now two, and the first of them is shipped.** The acknowledgement is 5b;
-the three issue types and what the patient hears on an urgent one is 5b·1. Neither waits for the
+**5b was three jobs and is now two, and both of them are shipped.** The acknowledgement is 5b;
+the three issue types and what the patient hears on an urgent one is 5b·1. Neither waited on the
 other — 5b reads the flag's *action* out of the protocol version each interview pinned, so the flags
-may move underneath it without moving a line already on the band.
+could move underneath it without moving a line already on the band.
 
 **5a deliberately drops the email channel.** The roadmap's dispatch sends an emailed link 24h
 before `scheduled_for`; an email provider is still unchosen and would be a fourth egress
@@ -628,10 +630,56 @@ the next one. `safety.py` still holds no model.
 
 ---
 
-# 5c · Signature ledger
+# 5c · Signature ledger — **shipped**
 
-**Done when:** a named clinician signs one interview irreversibly, pinned to the record's hash and
-the ledger head, and the chain verifies.
+**Done:** a named clinician signs one interview irreversibly, pinned to the record's hash and the
+ledger head, and the chain verifies — `services/core/ledger.py`, `tests/test_ledger.py`.
+
+Everything below was built as specified. Three departures, recorded rather than quietly taken:
+
+1. **The lock is a global mutex on one seeded row (`clinical.ledger_head`), not `select ... for
+   update` over the latest row of `clinical.signatures`.** The plan's own shape does not actually
+   serialise two concurrent signers: a `SELECT ... FOR UPDATE` that blocks on a locked row re-reads
+   *that same row* once it unblocks, and the row `clinical.signatures` orders on to find "the
+   latest one" is never itself updated by whoever wins the race — so the loser would recompute the
+   same `prev_hash` the winner already used and rely on the unique constraint to fail loudly rather
+   than on the lock to queue it correctly. A single mutable row *is* updated by the winner, so
+   locking it does what the plan wanted. `tests/test_ledger.py::test_concurrent_signs_do_not_fork`
+   is the proof — two signs of two different interviews, `asyncio.gather`ed, still land one chain.
+2. **`issued_summary` is composed server-side and deliberately drops the composer's invented
+   referral clause.** The live, unsigned preview in `Interview.tsx` says what a call was *for*
+   using `demo.ts:referral` — this product collects no demographics, so a demo needs some
+   invented context, and the chip says so. That is fine for a screen and not fine for the one
+   paragraph this repo is about to make irreversible: `docs/system-map.md`'s rule against claiming
+   a record you do not hold applies to a signature more than anywhere else in the codebase, so
+   `ledger._issued_summary` composes from real columns only (age, protocol, outcome, capture
+   count) and the client may not supply this field at all.
+3. **`Disposition` is `same_day | routine_review | no_action | referred_on`.** Nothing in the docs
+   or the spec named a set; this one was authored for 5c rather than lifted from somewhere.
+
+**`GET /interviews/{id}/ledger`** answers with the same `Signature` shape `InterviewDetail.signature`
+already carries, told apart from "no interview" (`reads.NotFound`, 404) by its own refusal
+(`ledger.NotSigned`, also 404 — a real, visible interview nobody has signed is not the secret an
+out-of-scope one is, and earns its own sentence rather than reusing the scope refusal's).
+
+**`ledger.verify(pool, interview_id)`** is not a route. It recomputes the record hash from the
+database as it now stands and confirms both that it matches and that the signature chains to its
+predecessor — an integrity check for tests and an operator's own tooling, unscoped on purpose,
+because "has this been tampered with" is a question about the database and not about one caller's
+caseload.
+
+**Dashboard.** The composer is live until signed: the impression textarea and disposition select
+write into local state, `Sign as <name>` (the caller's own `display_name`, never a client-supplied
+name) posts `POST /interviews/{id}/signature`, and the response replaces the whole composer with
+its read-only rendering — no reload, because the response *is* the record. The Ledger tab, inert
+until a signature exists, renders it: who signed, when, the disposition, the impression, the issued
+summary, and the chain as `prevHash → hash`. The timeline's `signed` pill (`pill--done`, the same
+class the consent chip already used) reads `InterviewSummary.signed_at`, which is on the summary
+rather than behind the detail fetch — the strip is a list of summaries, and a `signed` pill on every
+past call would otherwise cost one request per node. `demo.ts` loses `hashes`; what is left is
+`referral` and `consent`, and `consent` stays a deliberate hold rather than an oversight.
+
+**Original plan, as built:**
 
 *Ordering caveat, recorded rather than argued away:* `docs/roadmap.md:350-354` and
 `docs/roadmap-review.md:161-169` both say mid-call resilience should probably land **before**
@@ -671,14 +719,15 @@ review it, sign it, then re-read `GET /interviews/{id}/ledger` and confirm the h
 
 ## Order of work
 
-5·0, 5a and 5b are shipped. 5a was the only stage that makes `clinician_email` non-null, and every
-remaining stage scopes on it — so 5c can be built whenever, subject to the ordering caveat recorded
-under it.
+5·0, 5a, 5b, 5b·1 and 5c are shipped. 5a was the only stage that makes `clinician_email` non-null,
+and every remaining stage scopes on it. 5c did land after 5b·1 rather than in the ordering caveat's
+own preferred slot (mid-call resilience, still unbuilt in `docs/roadmap.md` §6+) — recorded rather
+than revisited, since nothing about 5c depended on that stage existing first.
 
-5b·1 is free of 5b in both directions. It is the only stage that changes the call itself, and 5b is
-written against the protocol as it ships today, so neither blocks the other. It has one dependency
-outside the roadmap: its seed changes need `scripts/reseed.py`, because `seed.py` cannot correct a
-row it has already written.
+5b·1 was free of 5b in both directions. It was the only stage that changed the call itself, and 5b
+was written against the protocol as it shipped, so neither blocked the other. Its one dependency
+outside the roadmap, `scripts/reseed.py`, shipped with it — `seed.py` cannot correct a row it has
+already written.
 
 5b·2 needs 5b, and nothing needs 5b·2 — it can be skipped indefinitely, because the band on load is
 the fallback the push degrades to.

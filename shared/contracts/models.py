@@ -363,6 +363,12 @@ class InterviewSummary(CamelModel):
     started_at: datetime | None
     ended_at: datetime | None
     created_at: datetime
+    #: Null until `POST /interviews/{id}/signature`. On the summary rather than
+    #: behind `InterviewDetail.signature` because the timeline strip draws a
+    #: `signed` pill on every past interview it lists, and that strip is a list
+    #: of summaries — a detail fetch per node would be one request per call a
+    #: patient has ever had.
+    signed_at: datetime | None
 
 
 class ProtocolOption(CamelModel):
@@ -506,6 +512,46 @@ class TranscriptEvent(CamelModel):
     payload: dict[str, Any]
 
 
+#: What a clinician may say the interview came to. Small and closed rather than
+#: free text, because a disposition is a decision the review table and a future
+#: audit both need to count, and a count over free text is a count over however
+#: it happened to be typed.
+Disposition = Literal["same_day", "routine_review", "no_action", "referred_on"]
+
+
+class SignatureRequest(CamelModel):
+    """The composer's two live fields — everything a clinician actually types.
+
+    `issued_summary` is not here: it is composed by the server from columns a
+    read already produced, never accepted from the client, so a signature
+    cannot be made to attest to a sentence nobody's query can reproduce.
+    """
+
+    impression: str = Field(min_length=1)
+    disposition: Disposition
+
+
+class Signature(CamelModel):
+    """One link of the ledger — what signing an interview writes, and what
+    `GET /interviews/{id}/ledger` reads back.
+
+    `hash = sha256(prev_hash ‖ record_hash ‖ impression ‖ disposition ‖
+    signed_by ‖ signed_at)`, and `prev_hash` is the previous signature's `hash`
+    — or 64 zeros for the first one ever signed. `record_hash` is the
+    interview's own state at the moment of signing: see `ledger.py`.
+    """
+
+    interview_id: str
+    prev_hash: str
+    record_hash: str
+    hash: str
+    issued_summary: str
+    impression: str
+    disposition: Disposition
+    signed_by: str
+    signed_at: datetime
+
+
 class InterviewDetail(CamelModel):
     """One interview, everything about it, in one request.
 
@@ -523,6 +569,12 @@ class InterviewDetail(CamelModel):
     #: directly from a bookmark draws the same screen as reaching it from the
     #: table.
     history: list[InterviewSummary]
+    #: Null until the interview is signed. On its own field rather than folded
+    #: into `interview` because it is the one thing here with its own writer
+    #: and its own route (`GET /interviews/{id}/ledger`) — this is the copy
+    #: fetched alongside everything else so the composer does not need a
+    #: second request to know whether it is looking at a signed record.
+    signature: Signature | None
 
 
 class Account(CamelModel):

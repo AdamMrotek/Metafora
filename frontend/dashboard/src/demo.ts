@@ -4,21 +4,21 @@
  * `docs/ux/clinical-dashboard.html` draws more than the backend holds. Phase
  * 5·0 closed most of the gap — NHS numbers and dates of birth are seeded rows
  * under a test-range CHECK and come down with the summaries, and the
- * patient-experience chart is a real scoped read over `metrics` — so what is
- * left here is three things and a shrinking list:
+ * patient-experience chart is a real scoped read over `metrics` — and 5c
+ * closed another: the composer's hashes are now `InterviewDetail.signature`,
+ * a real row in `clinical.signatures`. What is left here is two things:
  *
  * - `referral`, because the protocol is recorded and what it is *for* is not;
  * - `consent`, which stays invented deliberately: `docs/system-map.md` says
  *   claiming a consent record you do not hold is worse than holding none, and
  *   seeding one would be exactly that. It goes when a consent record exists or
- *   the chip goes;
- * - `hashes`, which is 5c's to delete when `clinical.signatures` lands.
+ *   the chip goes.
  *
  * They are drawn anyway, because the phase is building the spec's screens. So
  * every invented value is in this one file, and nowhere else, for three
  * reasons: you can read what is illustrative in one sitting, no component can
- * quietly start inventing its own, and the last phase deletes a file rather
- * than hunting through six.
+ * quietly start inventing its own, and the day both go this file goes with
+ * them.
  *
  * Everything here is derived from a real id, so a patient's referral does not
  * change when the page reloads — a screen whose "record" moves between renders
@@ -47,17 +47,6 @@ function pick<T>(values: readonly T[], key: string, salt = ''): T {
  *  ran is a call somebody consented to — the chip records it, it does not
  *  decide it. */
 export const consent = 'consent · processing, recording';
-
-/** The composer's two hashes. There is no ledger — Phase 5c builds
- *  `clinical.signatures` and its `(prev_hash, record_hash, hash)` chain — so
- *  these are shaped like the thing that will replace them and are nothing else. */
-export function hashes(interviewId: string): { record: string; head: string } {
-  const hex = (key: string) => seed(key).toString(16).padStart(8, '0');
-  return {
-    record: `${hex(interviewId).slice(0, 4)}…${hex(`r:${interviewId}`).slice(0, 4)}`,
-    head: `${hex('ledger-head').slice(0, 4)}…${hex('ledger-head-2').slice(0, 4)}`,
-  };
-}
 
 /** A surgical context for the breadcrumb and the issued summary. The protocol
  *  is real; what it is *for* is not recorded anywhere. */
