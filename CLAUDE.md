@@ -33,7 +33,11 @@ a token, or the demo) · `dispatch.py` queueing a call for a named person, the o
 only thing that clears a red flag off the band, and the reason it cannot silently reassign who owns
 one · `invitations.py` the link, whose token is *derived* from
 `(interview_id, nonce)` under `INVITE_SECRET` rather than drawn, so a second copy returns the link
-already sent and the table still stores only its hash.
+already sent and the table still stores only its hash · `ledger.py` the signature chain, one
+mutex-locked head row serialising two concurrent signers · `broadcaster.py` the live-push fan-out —
+in-process, one machine only, a bare interview id published from `lifecycle.py` off the gate's own
+callback and filtered back down to `OWNED_BY` per subscriber in `interviews.py`'s stream route,
+never at publish time, because nothing upstream of that route knows whose caseload a call is in.
 
 **`services/agent/`** — the conversation.
 - `pipeline.py` — assembles the Pipecat pipeline. **Start here** for anything about call flow.
@@ -103,10 +107,11 @@ overwrites it. Check a new test against a deliberately broken build before trust
 **`docs/`** — the only place prose lives. `system-map.md` = *intended* architecture,
 `agent-review-and-pipecat-decision.md` = why Pipecat/Python. Read only for architectural tasks.
 
-**Does not exist yet** (don't go looking): the studio app in `system-map.md` is unbuilt; dispatch
-shipped at Phase 5a and the red-flag acknowledgement at 5b, but the re-authored flag set (5b·1),
-live push (5b·2) and the signature ledger (5c) have not. Nothing pages anybody: the band reaches
-an open dashboard on the next fetch, which is why there is no `notified_at` column.
+**Does not exist yet** (don't go looking): the studio app in `system-map.md` is unbuilt, and so is
+the model as a second red-flag detector (5b·3) — `safety.py` still holds no model, deliberately.
+Dispatch (5a), the red-flag acknowledgement (5b), the re-authored flag set (5b·1), live push (5b·2)
+and the signature ledger (5c) have all shipped. Nothing pages anybody even with 5b·2 in: the push is
+a nudge to refetch, not a payload, and there is still no `notified_at` column.
 `docs/ux/*.html` are frozen specs, not running code. Audio recording/retention is unbuilt —
 `store-media` in `system-map.md` is its intended home; clinical-research regulation may require it.
 

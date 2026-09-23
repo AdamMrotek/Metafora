@@ -479,6 +479,20 @@ async def escalations(user: CurrentUser) -> list[Escalation]:
     return [Escalation.model_validate(dict(r)) for r in rows]
 
 
+async def in_scope(user: CurrentUser, interview_id: str) -> bool:
+    """Whether this caller may see this interview — used to filter the live
+    stream's nudges, which the broadcaster fans out with no idea who owns them."""
+    return bool(
+        await _pool().fetchval(
+            "select exists(select 1 from clinical.interviews i "
+            "join clinical.patients p on p.id = i.patient_id "
+            f"where i.id = $2 and {OWNED_BY})",
+            user.email,
+            interview_id,
+        )
+    )
+
+
 async def overview(user: CurrentUser) -> Overview:
     """Everything on the dashboard that is not one page of the table.
 

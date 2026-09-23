@@ -15,11 +15,11 @@ order the MVP line needs them (deploy → intake →
 return → review → sign). 5·0 is the odd one out and is **shipped**: it depends on none of the
 others and was the cheapest way to shrink `demo.ts`, which every later stage otherwise inherits.
 
-**5·0, 5a, 5b, 5b·1 and 5c are shipped.** `clinical.patients.clinician_email` is written, so the
-scope predicate in `reads.py` discriminates; `clinical.interviews.acknowledged_at` is the second
+**5·0, 5a, 5b, 5b·1, 5b·2 and 5c are shipped.** `clinical.patients.clinician_email` is written, so
+the scope predicate in `reads.py` discriminates; `clinical.interviews.acknowledged_at` is the second
 such predicate, and 5c's `clinical.signatures` and `clinical.ledger_head` are built on both.
-Outstanding: 5b·2 (live push) and 5b·3 (the model as second detector) — neither blocks the MVP
-line, which now runs end to end: dispatch → intake → return → review → **sign**.
+Outstanding: 5b·3 (the model as second detector) — it does not block the MVP line, which now runs
+end to end: dispatch → intake → return → review → **sign**, with the review step now nudged live.
 
 **5b was three jobs and is now two, and both of them are shipped.** The acknowledgement is 5b;
 the three issue types and what the patient hears on an urgent one is 5b·1. Neither waited on the
@@ -571,15 +571,38 @@ Nothing in `frontend/` changes. `format.ts`'s `RED` and `FLAG_WORDS` are exhaust
 
 ---
 
-# 5b·2 · Live push
+# 5b·2 · Live push — **shipped**
 
-**Done when:** a red flag raised on a call in progress reaches an already-open dashboard in seconds.
+**Done:** a red flag raised on a call in progress reaches an already-open dashboard within one
+heartbeat — `services/core/broadcaster.py`, `tests/test_broadcaster.py` + `tests/test_stream.py`.
+
+Everything below was built as specified, with no departures worth recording — the plan's own
+shape (a broadcaster, a nudge-only route, a scope check per subscriber, a `fetch`-based client)
+survived contact with the code unchanged. Two things worth knowing:
+
+1. **`gate.py` gained one new callback, not a repurposed one.** `on_urgent` is `machine.note_urgent`
+   — the closing-sentence bookkeeping 5b·1 added — and `on_blocked` is the critical path's own
+   close. A third, `on_escalation`, fires alongside both under the exact same conditions
+   (`hit.flag.action == "urgent_escalate"`, or the blocked path — which is `end_call` by
+   construction). `services/agent` still imports nothing from `services/core`: the callback is
+   wired in `lifecycle.py`'s `start_call`, which is the one place that already knows both the
+   interview id and the broadcaster.
+2. **The scope check is a point lookup, not a value carried on the event.** `QueuedInterview`
+   (`shared/contracts/models.py`) never carries `clinician_email` — only `dispatch.py`'s row does —
+   so rather than thread ownership through the gate and the pipeline, `broadcaster.publish` fans out
+   a bare interview id to everyone, and `reads.in_scope(user, interview_id)` — the same `OWNED_BY`
+   predicate as every other read — decides per subscriber whether to forward it. One extra query per
+   open dashboard per red flag, which is the right side to pay the cost on: red flags are rare, open
+   dashboards are few, and the alternative was a new field threaded through four modules that do not
+   otherwise know a clinician exists.
 
 Split from 5b because it is the only part with a long-lived connection — a stream, a reconnect
 strategy, a broadcaster with a lifetime, and a limit on how many machines this may run on. It is
 also the only part that needs the gate to report upward: 5b's flag reaches Postgres on the
 `SessionWriter` the pipeline already holds, so `gate.py`'s report and its wiring in `lifecycle.py`
 (beside `_on_blocked`, `:54-64`) belong here.
+
+**Original plan, as built:**
 
 1. **Broadcaster** — in-process `asyncio` fan-out. `publish(interview_id)` from the gate's report,
    per-connection subscriber queues, bounded, dropping a slow subscriber rather than backing the
@@ -729,8 +752,9 @@ was written against the protocol as it shipped, so neither blocked the other. It
 outside the roadmap, `scripts/reseed.py`, shipped with it — `seed.py` cannot correct a row it has
 already written.
 
-5b·2 needs 5b, and nothing needs 5b·2 — it can be skipped indefinitely, because the band on load is
-the fallback the push degrades to.
+5b·2 needed 5b and nothing needed 5b·2 — it could have been skipped indefinitely, because the band
+on load was always the fallback the push degrades to. It shipped anyway, and that fallback is now
+what a dropped connection or a server restart degrades *to* rather than the whole of the feature.
 
 5b·3 needs 5b·1. Nothing needs 5b·3 — the authored phrases are the guarantee with or without it.
 

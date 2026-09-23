@@ -31,6 +31,7 @@ class SafetyGate(FrameProcessor):
         on_blocked=None,
         on_turn=None,
         on_urgent=None,
+        on_escalation=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -39,6 +40,7 @@ class SafetyGate(FrameProcessor):
         self._on_blocked = on_blocked
         self._on_turn = on_turn
         self._on_urgent = on_urgent
+        self._on_escalation = on_escalation
         self._closed = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -67,10 +69,11 @@ class SafetyGate(FrameProcessor):
             # matched a yellow and an urgent every hit would inherit the urgent.
             # Nothing is said now — the call carries on unchanged, and the
             # sentence this owes is spoken after the goodbye (`end_call.py`).
-            if self._on_urgent is not None and any(
-                hit.flag.action == "urgent_escalate" for hit in result.hits
-            ):
+            is_urgent = any(hit.flag.action == "urgent_escalate" for hit in result.hits)
+            if self._on_urgent is not None and is_urgent:
                 self._on_urgent()
+            if self._on_escalation is not None and is_urgent:
+                self._on_escalation()
 
             # The turn is real and it is about to become context for both
             # models, so this is where it is counted. A capture with no turn
@@ -90,6 +93,9 @@ class SafetyGate(FrameProcessor):
         if self._closed:
             return
         self._closed = True
+
+        if self._on_escalation is not None:
+            self._on_escalation()
 
         # The reason crosses back to `services.core` on the writer — the bot has
         # no other handle on it, and that is deliberate (§8) — so the record

@@ -39,6 +39,7 @@ CLINICIAN = "clinician@example.test"
 #: this file did not hold.
 GUARDED = [
     ("GET", "/interviews"),
+    ("GET", "/interviews/stream"),
     ("GET", "/interviews/iv_anything"),
     ("GET", "/patients"),
     ("GET", "/experience"),

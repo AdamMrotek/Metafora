@@ -17,6 +17,7 @@ from pipecat.pipeline.runner import WorkerRunner
 
 from services.agent.pipeline import build_bot
 from services.agent.session_log import ErrorEvent, PatientJoined, RoomJoined
+from services.core import broadcaster
 from services.core.config import (
     GROQ_API_KEY,
     LIVEKIT_URL,
@@ -75,6 +76,9 @@ async def start_call(session: Session) -> str:
         await session.bot.wire.phase("ended")
         await session.bot.worker.stop_when_done()
 
+    def _on_escalation() -> None:
+        broadcaster.publish(session.interview.id)
+
     bot = build_bot(
         protocol=session.protocol,
         interview=session.interview,
@@ -85,6 +89,7 @@ async def start_call(session: Session) -> str:
         url=LIVEKIT_URL,
         api_key=GROQ_API_KEY,
         on_blocked=_on_blocked,
+        on_escalation=_on_escalation,
     )
     session.bot = bot
     _wire_lifecycle(session, bot)

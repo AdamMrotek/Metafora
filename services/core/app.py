@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from services.core import db, seed
+from services.core import broadcaster, db, seed
 from services.core.config import (
     ALLOWED_ORIGINS,
     ENV,
@@ -61,6 +61,7 @@ async def lifespan(app: FastAPI):
     )
     yield
     await drain("server_shutdown")
+    await broadcaster.close()
     auth.configure(None)
     await db.close()
 

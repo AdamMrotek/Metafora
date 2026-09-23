@@ -127,6 +127,7 @@ def build_bot(
     url: str,
     api_key: str,
     on_blocked=None,
+    on_escalation=None,
 ) -> Bot:
     transport = LiveKitTransport(
         url=url,
@@ -266,6 +267,7 @@ def build_bot(
                 on_blocked=on_blocked,
                 on_turn=machine.note_turn,
                 on_urgent=machine.note_urgent,
+                on_escalation=on_escalation,
             ),
             # After the gate, so a blocked transcript never ends a turn and so
             # never reaches the model.

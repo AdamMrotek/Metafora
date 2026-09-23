@@ -108,7 +108,14 @@ def preop_gate():
     through the fixture above."""
     writer = RecordingWriter()
     urgent: list = []
-    gate = SafetyGate(PREOP_CHECK_V2, writer, on_urgent=lambda: urgent.append(1))
+    escalations: list = []
+    gate = SafetyGate(
+        PREOP_CHECK_V2,
+        writer,
+        on_urgent=lambda: urgent.append(1),
+        on_escalation=lambda: escalations.append(1),
+    )
+    gate.escalations = escalations  # type: ignore[attr-defined]
     pushed: list = []
 
     async def capture(frame, direction=FrameDirection.DOWNSTREAM):
@@ -152,6 +159,26 @@ async def test_a_stopped_turn_reports_no_urgent(preop_gate):
     gate, _, urgent = preop_gate
     await gate.process_frame(transcription(_proving("end_call")), FrameDirection.DOWNSTREAM)
     assert urgent == []
+
+
+async def test_an_urgent_phrase_pushes_the_live_nudge(preop_gate):
+    gate, _, _ = preop_gate
+    await gate.process_frame(
+        transcription(_proving("urgent_escalate")), FrameDirection.DOWNSTREAM
+    )
+    assert gate.escalations == [1]
+
+
+async def test_a_flagged_phrase_pushes_no_nudge(preop_gate):
+    gate, _, _ = preop_gate
+    await gate.process_frame(transcription(_proving("soft_review")), FrameDirection.DOWNSTREAM)
+    assert gate.escalations == []
+
+
+async def test_a_stopped_turn_pushes_the_live_nudge_too(preop_gate):
+    gate, _, _ = preop_gate
+    await gate.process_frame(transcription(_proving("end_call")), FrameDirection.DOWNSTREAM)
+    assert gate.escalations == [1]
 
 
 async def test_the_sentence_a_blocked_turn_speaks_is_in_the_record(gate_and_pushed):
