@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     )
     yield
     await drain("server_shutdown")
-    await broadcaster.close()
+    await broadcaster.escalations.close()
     auth.configure(None)
     await db.close()
 

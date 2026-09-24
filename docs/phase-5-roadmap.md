@@ -574,11 +574,12 @@ Nothing in `frontend/` changes. `format.ts`'s `RED` and `FLAG_WORDS` are exhaust
 # 5b·2 · Live push — **shipped**
 
 **Done:** a red flag raised on a call in progress reaches an already-open dashboard within one
-heartbeat — `services/core/broadcaster.py`, `tests/test_broadcaster.py` + `tests/test_stream.py`.
+heartbeat — `services/core/broadcaster.py`, `services/core/sse.py`, `tests/test_broadcaster.py` +
+`tests/test_stream.py`.
 
 Everything below was built as specified, with no departures worth recording — the plan's own
 shape (a broadcaster, a nudge-only route, a scope check per subscriber, a `fetch`-based client)
-survived contact with the code unchanged. Two things worth knowing:
+survived contact with the code unchanged. Three things worth knowing:
 
 1. **`gate.py` gained one new callback, not a repurposed one.** `on_urgent` is `machine.note_urgent`
    — the closing-sentence bookkeeping 5b·1 added — and `on_blocked` is the critical path's own
@@ -589,12 +590,24 @@ survived contact with the code unchanged. Two things worth knowing:
    interview id and the broadcaster.
 2. **The scope check is a point lookup, not a value carried on the event.** `QueuedInterview`
    (`shared/contracts/models.py`) never carries `clinician_email` — only `dispatch.py`'s row does —
-   so rather than thread ownership through the gate and the pipeline, `broadcaster.publish` fans out
-   a bare interview id to everyone, and `reads.in_scope(user, interview_id)` — the same `OWNED_BY`
-   predicate as every other read — decides per subscriber whether to forward it. One extra query per
-   open dashboard per red flag, which is the right side to pay the cost on: red flags are rare, open
-   dashboards are few, and the alternative was a new field threaded through four modules that do not
-   otherwise know a clinician exists.
+   so rather than thread ownership through the gate and the pipeline, `broadcaster.escalations.publish`
+   fans out a bare interview id to everyone, and `reads.in_scope(user, interview_id)` — the same
+   `OWNED_BY` predicate as every other read — decides per subscriber whether to forward it. One extra
+   query per open dashboard per red flag, which is the right side to pay the cost on: red flags are
+   rare, open dashboards are few, and the alternative was a new field threaded through four modules
+   that do not otherwise know a clinician exists.
+3. **Hardened after shipping, same week.** Two follow-ups, once the failure modes of a day-long open
+   tab were thought through rather than just the happy path:
+   - `broadcaster.py`'s `Broadcaster` became an instantiable class (`escalations` is the one instance
+     today) and the heartbeat/disconnect/shutdown loop moved into `services/core/sse.py`, generic and
+     reusable by a second stream — but `authorize` on it is a required keyword with no default, run on
+     every item, so genericising the transport never becomes the place a scope check goes missing.
+   - `stream.ts` gained a 35s watchdog: a connection that dies silently (laptop sleep, a proxy
+     dropping an idle socket) never throws on its own, so nothing would have triggered a reconnect.
+     The watchdog `abort()`s — not just gives up client-side — so the server's
+     `request.is_disconnected()` notices and frees the subscriber slot too. `data.tsx` also gained an
+     unconditional 30s poll independent of the stream's own health, so a red flag surfaces within 30s
+     even in a failure mode the stream doesn't recover from gracefully.
 
 Split from 5b because it is the only part with a long-lived connection — a stream, a reconnect
 strategy, a broadcaster with a lifetime, and a limit on how many machines this may run on. It is
@@ -614,8 +627,9 @@ also the only part that needs the gate to report upward: 5b's flag reaches Postg
    disagree with the query, and no medical text crosses it.
 4. **Dashboard** — subscribe beside `data.tsx`'s band fetch and call its `reload()`. *Trap:*
    `EventSource` cannot send an `Authorization` header — use `fetch` with a `ReadableStream` reader
-   and backoff reconnect. **The fallback is 5b**: stream down means the band is what the last fetch
-   returned, degraded rather than broken.
+   and backoff reconnect. **The fallback was meant to be 5b** — stream down means the band is what
+   the last fetch returned — but a tab open all day never gets a fresh "last fetch" if the stream
+   dies silently, which is exactly the gap note 3's watchdog and 30s backstop poll close.
 5. **Not Supabase Realtime** — `docs/system-map.md:204-211`, `docs/roadmap.md:325-335`. In-process
    fan-out means **one machine**, which `docs/deployment.md` assumes; read `fly.toml` against that
    before it ships. A nudge-shaped event is the cheapest thing to move onto a real bus later.

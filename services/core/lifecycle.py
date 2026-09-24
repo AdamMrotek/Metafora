@@ -77,7 +77,7 @@ async def start_call(session: Session) -> str:
         await session.bot.worker.stop_when_done()
 
     def _on_escalation() -> None:
-        broadcaster.publish(session.interview.id)
+        broadcaster.escalations.publish(session.interview.id)
 
     bot = build_bot(
         protocol=session.protocol,

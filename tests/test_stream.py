@@ -35,11 +35,11 @@ async def live_db(pool):
         "on conflict (email) do nothing",
         [(ALICE, "Dr Alice"), (BOB, "Dr Bob")],
     )
-    broadcaster._subscribers.clear()
+    broadcaster.escalations._subscribers.clear()
     try:
         yield pool
     finally:
-        broadcaster._subscribers.clear()
+        broadcaster.escalations._subscribers.clear()
         db.configure(None)
 
 
@@ -69,7 +69,7 @@ async def test_the_stream_delivers_to_the_owner(live_db):
     agen = _stream_events(user(ALICE), FakeRequest())
     try:
         task = await _next(agen)
-        broadcaster.publish(summary.id)
+        broadcaster.escalations.publish(summary.id)
         event = await asyncio.wait_for(task, timeout=1)
         assert event == f"data: {summary.id}\n\n"
     finally:
@@ -84,7 +84,7 @@ async def test_the_stream_withholds_a_strangers_interview(live_db):
     agen = _stream_events(user(BOB), FakeRequest())
     try:
         task = await _next(agen)
-        broadcaster.publish(summary.id)
+        broadcaster.escalations.publish(summary.id)
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(task, timeout=0.2)
     finally:
@@ -94,7 +94,7 @@ async def test_the_stream_withholds_a_strangers_interview(live_db):
 async def test_shutdown_ends_the_stream(live_db):
     agen = _stream_events(user(ALICE), FakeRequest())
     task = await _next(agen)
-    await broadcaster.close()
+    await broadcaster.escalations.close()
 
     with pytest.raises(StopAsyncIteration):
         await asyncio.wait_for(task, timeout=1)

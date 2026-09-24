@@ -7,13 +7,11 @@ that they inherit the same standing guard the reads do: a file split by
 *audience* keeps that property, and a file split by verb would not.
 """
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from services.agent.config.protocol import OFFERED
-from services.core import acknowledgements, broadcaster, dispatch, invitations, ledger, reads
+from services.core import acknowledgements, broadcaster, dispatch, invitations, ledger, reads, sse
 from services.core.db import pool
 from shared.auth import READS_THE_RECORD, ClinicalReader, require_role
 from shared.contracts.models import (
@@ -67,37 +65,38 @@ async def list_interviews(
     )
 
 
-STREAM_HEARTBEAT_S = 15.0
-
-
 # Declared ahead of `GET /interviews/{interview_id}` below, or Starlette would
 # match `/interviews/stream` as `interview_id="stream"`.
 @router.get("/interviews/stream")
 async def stream_interviews(user: ClinicalReader, request: Request) -> StreamingResponse:
     """A nudge, not a payload — the browser refetches the band it already
-    fetches. See `services/core/broadcaster.py`."""
+    fetches. See `services/core/broadcaster.py` and `services/core/sse.py`.
+
+    Three layers, in order: `ClinicalReader` is the door — can this caller open
+    a stream at all. `sse.stream_events` is the wire mechanics — heartbeat,
+    disconnect, shutdown — and knows nothing about interviews or caseloads.
+    `authorize` is the one line neither of those may own: whether *this*
+    subscriber may see *this* interview, answered by the same scoped query
+    every other read uses. It runs on every item with no default, so this
+    route cannot forward an escalation nobody checked.
+    """
     return StreamingResponse(_stream_events(user, request), media_type="text/event-stream")
 
 
 async def _stream_events(user: ClinicalReader, request: Request):
     """Pulled out of `stream_interviews` so a test can drive it with a fake
     request instead of a real streaming connection."""
-    queue = broadcaster.subscribe()
+    queue = broadcaster.escalations.subscribe()
     try:
-        while True:
-            if await request.is_disconnected():
-                return
-            try:
-                interview_id = await asyncio.wait_for(queue.get(), timeout=STREAM_HEARTBEAT_S)
-            except TimeoutError:
-                yield ": keep-alive\n\n"
-                continue
-            if interview_id is broadcaster.SHUTDOWN:
-                return
-            if await reads.in_scope(user, interview_id):
-                yield f"data: {interview_id}\n\n"
+        async for chunk in sse.stream_events(
+            request,
+            queue,
+            broadcaster.SHUTDOWN,
+            authorize=lambda interview_id: reads.in_scope(user, interview_id),
+        ):
+            yield chunk
     finally:
-        broadcaster.unsubscribe(queue)
+        broadcaster.escalations.unsubscribe(queue)
 
 
 @router.get("/overview")

@@ -35,9 +35,15 @@ one · `invitations.py` the link, whose token is *derived* from
 `(interview_id, nonce)` under `INVITE_SECRET` rather than drawn, so a second copy returns the link
 already sent and the table still stores only its hash · `ledger.py` the signature chain, one
 mutex-locked head row serialising two concurrent signers · `broadcaster.py` the live-push fan-out —
-in-process, one machine only, a bare interview id published from `lifecycle.py` off the gate's own
-callback and filtered back down to `OWNED_BY` per subscriber in `interviews.py`'s stream route,
-never at publish time, because nothing upstream of that route knows whose caseload a call is in.
+in-process, one machine only, `Broadcaster` a reusable class so a second live-push topic gets its
+own instance rather than sharing one, `escalations` the one instance that exists today: a bare
+interview id published from `lifecycle.py` off the gate's own callback · `sse.py` the wire mechanics
+shared by every such stream — heartbeat, disconnect, shutdown — with no idea what's flowing through
+it; `authorize` is a required keyword on it, run on every item, which is what keeps a generic
+transport from becoming the place an authorisation check goes missing. `interviews.py`'s stream
+route is the composition: `ClinicalReader` at the door, `sse.stream_events` for the wire, and
+`reads.in_scope` as the `authorize` it's handed — filtered back down to `OWNED_BY` per subscriber
+there and nowhere upstream, because nothing above that route knows whose caseload a call is in.
 
 **`services/agent/`** — the conversation.
 - `pipeline.py` — assembles the Pipecat pipeline. **Start here** for anything about call flow.

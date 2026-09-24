@@ -8,7 +8,7 @@ import {
 } from 'react';
 import type { InterviewPage, Overview, PatientSummary } from '@metafora/contracts';
 import { get } from './api.ts';
-import { subscribeToEscalations } from './stream.ts';
+import { useEscalationStream } from './stream.ts';
 
 /**
  * What the whole screen shares, and what one table asks for itself.
@@ -81,7 +81,7 @@ export function RecordProvider({ children }: { children: ReactNode }) {
     };
   }, [nonce]);
 
-  useEffect(() => subscribeToEscalations(() => setNonce((n) => n + 1)), []);
+  useEscalationStream(() => setNonce((n) => n + 1));
 
   return (
     <RecordContext.Provider
