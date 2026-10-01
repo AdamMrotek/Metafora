@@ -50,7 +50,7 @@ there and nowhere upstream, because nothing above that route knows whose caseloa
 - `machine.py` — interview state machine; `config/protocol.py` is the hardcoded question set.
 - `prompts.py` — the one system prompt: how to speak *and* the tool. `tools.py` — the tool pass.
 - `next_message.py` — lifts `message_next` out of the tool call and speaks it, after the record.
-- `safety.py` + `gate.py` — deterministic red-flag gate, runs before generation.
+- `safety.py` + `gate.py` — deterministic red-flag gate, runs before generation. `concerns.py` — the model's own flags, per question, raised through `update_intake`'s `flag`.
 - `tts.py`, `tts_text.py` — Groq/Orpheus chunking and trimming. `end_call.py` — hangup.
 - `wire.py` (→ browser), `observer.py` + `session_log.py` (→ `logs/<sessionId>.jsonl`).
 - `config/tuning.py` — endpointing/barge-in constants. Treat as clinical, not incidental.
@@ -114,7 +114,7 @@ overwrites it. Check a new test against a deliberately broken build before trust
 `agent-review-and-pipecat-decision.md` = why Pipecat/Python. Read only for architectural tasks.
 
 **Does not exist yet** (don't go looking): the studio app in `system-map.md` is unbuilt, and so is
-the model as a second red-flag detector (5b·3) — `safety.py` still holds no model, deliberately.
+the model as a protocol-wide red-flag detector (5b·3; per-question judged flags exist in `concerns.py`) — `safety.py` still holds no model, deliberately.
 Dispatch (5a), the red-flag acknowledgement (5b), the re-authored flag set (5b·1), live push (5b·2)
 and the signature ledger (5c) have all shipped. Nothing pages anybody even with 5b·2 in: the push is
 a nudge to refetch, not a payload, and there is still no `notified_at` column.

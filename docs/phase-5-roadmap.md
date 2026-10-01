@@ -642,27 +642,19 @@ reconnects on its own.
 
 ---
 
-# 5b·3 · The model as second detector
+# 5b·3 · The model as second detector — **partly shipped**
 
-**Done when:** a critical or an urgent that no authored phrase matched is still raised — by the
-model — and the record says which of the two found it.
+The model already raises flags, through the one tool. `update_intake` carries an optional `answer`
+and a `flag` beside `message_next`, and `services/agent/concerns.py` resolves them in
+`tools.dispatch`, after the permission matrix. A `QuestionFlag` is authored on a question and fires
+by **value** (a declared enum answer) or **judged** (the model names it against the flag's `when`).
+`ConcernRaised.judged` records which. A judged `end_call` speaks the authored `say` and withholds
+`message_next`. `safety.py` is still phrase-only, and the phrases are still the guarantee.
 
-Phrases are the guarantee; the model is the recall, never a replacement. The gate runs before
-generation and can stop a turn; a model's verdict arrives after it, so the earliest it can act is
-the next one. `safety.py` still holds no model.
-
-1. **Where it runs** — the capture pass, which is already a silent LLM holding tools. A second tool,
-   `raise_flag(id, why)`, beside `update_intake`. The speech pass still never learns tools exist.
-2. **What it costs** — `tools.py:54-76` is written for one tool's `field`/`value` and needs a branch;
-   a flag tool is state-independent, which `allowed_states` can only say by naming every state.
-3. **What the protocol gains** — a `watch_for` line per flag, for the capture prompt. Patterns stay
-   mandatory for critical and urgent, so those two still work when the model does not.
-4. **The record says which found it** — a model-raised flag is not the same claim as a matched one
-   and must not be filed as one.
-5. **A late critical** — the model can raise `end_call` a turn after the sentence it would have
-   prevented. Whether that still ends the call is this stage's decision.
-6. **Tests** — both detectors land the same shape with different provenance; a flag id the version
-   does not define is refused like any unauthorised tool call; `test_prompts.py`'s line holds.
+**Not built:** a judged flag only fires on a successful capture of the question that declares it.
+Off-topic disclosures, plain-text turns and refused captures raise nothing from the model, and the
+gate's protocol-wide `red_flags` have no judged path. No second tool or pass is planned, since the
+one-pass invariant rules it out.
 
 
 ---
