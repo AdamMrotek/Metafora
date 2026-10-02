@@ -31,7 +31,7 @@ perimeter.
 | Piece | Who opens it | What it is for | State |
 |---|---|---|---|
 | `app-call` | Patients | One screen: join, talk, see what was captured. Entered from a link, not a login. | **Built** |
-| `app-dashboard` | Clinicians, admins | Read what the agent found, act on it, sign it off. The broad one — lists, patient records, one interview in detail. | **Unbuilt** (roadmap §4) |
+| `app-dashboard` | Clinicians, admins | Read what the agent found, act on it, sign it off. The broad one — lists, patient records, one interview in detail. | **Built** — read path (roadmap §4), dispatch, red-flag acknowledgement and signing (Phase 5) |
 | `app-studio` | Clinical safety leads, engineers | Author an interview, version it, run it against test cases before it goes live. Evals live here. | **Unbuilt** (roadmap §6+) |
 
 ### Shared code
@@ -40,7 +40,7 @@ perimeter.
 |---|---|---|---|
 | `shared-contracts` | apps + services | The agreed shapes passed between front and back. One definition, both sides — owned by Python, TypeScript generated. | **Built** |
 | `shared-auth` | `svc-core` | What a role is and what it grants. The **backend** is its consumer, not the frontend: it verifies the token and resolves the account, and every authorisation decision in the product lives inside it rather than in a route body. It takes its issuer, its keys and its account directory as **parameters**, so it is generic over any OIDC provider — see §5. `app-call` deliberately does not use it: a patient never holds an account credential. | **Built** |
-| `shared-ui` | dashboard, studio | Design tokens and components, so the products look like one product. Front-end only. | **Partial** — `tokens.css` exists; no components, and no second app to share them with yet. |
+| `shared-ui` | dashboard, studio | Design tokens and components, so the products look like one product. Front-end only. | **Partial** — `tokens.css` is shared by the portal and the dashboard; no components. |
 
 ### Services — what runs continuously
 
@@ -60,9 +60,9 @@ rule 7, and it is what makes `services/agent/` the piece that could be lifted ou
 
 | Piece | Job | Depends on | State |
 |---|---|---|---|
-| `svc-core` | Reads and writes everything the dashboard and studio show: accounts, patients, interview definitions, results, transcripts, eval runs. The boring one, and the one that owns permissions. It also **pushes** what cannot wait to be asked for — an escalation raised mid-interview has to reach a clinician in seconds — over a stream held open from this process, because a push that bypassed `svc-core` would be a clinical read with no permission check in front of it (rule 1). | `svc-agent`, `store-clinical`, `store-config`, `store-transcript` (reads, never writes) | **Built**; the push stream is **Unbuilt** (roadmap §5) |
+| `svc-core` | Reads and writes everything the dashboard and studio show: accounts, patients, interview definitions, results, transcripts, eval runs. The boring one, and the one that owns permissions. It also **pushes** what cannot wait to be asked for — an escalation raised mid-interview has to reach a clinician in seconds — over a stream held open from this process, because a push that bypassed `svc-core` would be a clinical read with no permission check in front of it (rule 1). | `svc-agent`, `store-clinical`, `store-config`, `store-transcript` (reads, never writes) | **Built**, including the push stream (`broadcaster.py` + `sse.py`, Phase 5·2) |
 | `svc-agent` | Runs a conversation. Fetches the interview definition, speaks with the patient, decides what to ask next, and **writes the transcript itself**, turn by turn, as the call happens. The transport the patient connects to lives here, and so do the two data-plane egresses (rule 5). Two things it does not write but reports upward: an escalation, the moment something cannot wait for the end of the call, and the interview's clinical outcome at the end. | nothing in this repo. Handed its pool, its keys and its protocol. | **Built** |
-| `svc-comms` | Everything we initiate *toward* a patient: invitation emails, reminders, scheduling. It **places** a call and hands it to the media path; it never carries one. Control plane, not data plane. | email + telephony providers | **Unbuilt** — roadmap §5 creates it, and creates it as its own folder, because rule 4's whole value is that there is one directory to audit. |
+| `svc-comms` | Everything we initiate *toward* a patient: invitation emails, reminders, scheduling. It **places** a call and hands it to the media path; it never carries one. Control plane, not data plane. | email + telephony providers | **Unbuilt** — the Twilio call-out (`next-features-overview.md`, 5d) would create it, as its own folder, because rule 4's whole value is that there is one directory to audit. |
 | `svc-media` | **Deleted by the migration.** The connection service became a transport inside `svc-agent`. The patient still connects to the same endpoint. | — | Gone |
 
 ### Stores — where data rests
@@ -74,10 +74,10 @@ first two.
 
 | Piece | Holds | Who may read it | Why it is separate | State |
 |---|---|---|---|---|
-| `store-clinical` | Patients, interview results, escalations, sign-off | Permission-gated, per patient | Most restricted thing we have. Smallest possible number of readers. | **Built** — patients, interviews, results. Escalations and signatures at roadmap §5. |
+| `store-clinical` | Patients, interview results, escalations, sign-off | Permission-gated, per patient | Most restricted thing we have. Smallest possible number of readers. | **Built** — patients, interviews, results, invitations and the signature ledger. An escalation is not a table: it is a flag in the transcript plus `acknowledged_at` / `acknowledged_by` on the interview. |
 | `store-transcript` | **Log 1 — the conversation.** Turn-by-turn transcript, what the agent asked, what the patient said, what it decided and why | Permission-gated, same gate as the clinical record | This is medical data, no less sensitive than the clinical record. It is separate because it is bulky, append-only, and **written by a different service** — the one that had the conversation. | **Built** |
 | `store-config` | Accounts, roles, interview definitions and their versions, eval run records | Account holders | No patient data in it at all. | **Built** — accounts and protocols. Eval runs unbuilt. |
-| `store-metrics` | **Log 2 — the system.** Latency, error rates, call volumes, queue depth, which step ran and how long it took | Anyone operating the system; no clinical permission needed | The one store that exists to be read freely, which is only possible if it names **no patient at all** — see rule 6. | **Unbuilt** — the schema is claimed, nothing writes to it (roadmap §6+). |
+| `store-metrics` | **Log 2 — the system.** Latency, error rates, call volumes, queue depth, which step ran and how long it took | Anyone operating the system; no clinical permission needed | The one store that exists to be read freely, which is only possible if it names **no patient at all** — see rule 6. | **Unbuilt** — one seeded table (`experience_responses`) feeds the dashboard's chart; nothing writes to it (roadmap §6+). |
 | `store-audit` | **Log 3 — the readers.** Who opened which record, when, and under what grant | Compliance, not on-call | It cannot live in `store-metrics`, because *"clinician X read patient Y's transcript"* names a patient and rule 6 forbids that; it cannot live in `store-clinical`, because the people who need to read it are not the people permitted to read patients. Cheap to name now, painful to backfill after six months of unlogged reads. | **Unbuilt** — no schema. Wanted by break-glass access (roadmap §6+). |
 | `store-media` | Audio recordings and other large files | Permission-gated | Big, cheap, and the first thing a customer will want deleted on a schedule. | **Unbuilt** — nothing records audio. Clinical-research requirements may bring it back (roadmap §6+). |
 
@@ -338,8 +338,8 @@ real rather than asserted — because a preserved seam nobody exercises is a cla
 | **The clinical record sits on infrastructure we control** | No — managed Postgres | `DATABASE_URL` | A connection string. The schema is plain Postgres — no proprietary extensions, no vendor functions | **`make test-pg`** runs every migration against a throwaway Postgres that is not the managed one |
 | **Identity is not tied to one vendor** | **Yes** | — | — | **`tests/test_auth.py`** stands the whole authenticated backend up on an EC keypair generated in a fixture and a JWKS served from memory, with no project and no network. `shared/auth/` takes the issuer, the keys and the directory as parameters |
 | **Failure reports carry no patient content** | **Yes** | — | — | The client is given no request bodies, and every event raised inside `services/agent/` is dropped before send. Both scrubs are asserted in `tests/test_app.py` — including the two cases that must *not* be dropped, so the test fails if the filter starts swallowing everything |
-| **Live escalations do not bypass the permission check** | Not yet built | A stream held open from `svc-core` (rule 1) | The alternative — subscribing the browser to the database — is cheaper to write and forfeits both rule 1 and the swappable-Postgres row above, since it is the vendor's proprietary service and not Postgres | n/a |
-| **Access to a clinical record is logged** | No | `store-audit` | Unbuilt; a schema and a write on every read path in `reads.py`. Cheap while there are three read routes | n/a |
+| **Live escalations do not bypass the permission check** | **Yes** | — | — | **`tests/test_stream.py`** and **`tests/test_broadcaster.py`**. The stream is held open from `svc-core`, and `reads.in_scope` runs per subscriber on every item. The alternative — subscribing the browser to the database — would have forfeited rule 1 and the swappable-Postgres row above |
+| **Access to a clinical record is logged** | No | `store-audit` | Unbuilt; a schema and a write on every read path in `reads.py`. Cheap while the reads live in one file | n/a |
 | **Nothing medical in operational telemetry** | Vacuously — nothing writes telemetry | A metrics writer that accepts a closed set of typed fields | Unbuilt (roadmap §6+). The enforcement is the writer's signature, not a review | n/a |
 | **Audio is retained and deleted on a schedule** | No — nothing records audio | `store-media` plus a deletion schedule | Unbuilt (roadmap §6+) | n/a |
 | **A dropped call resumes** | No | Roadmap §6+ | The only part that is cheap now is the write fence — see §4 | n/a |

@@ -4,7 +4,7 @@ What is left to build, in order. Portfolio demo on synthetic data — no PHI pos
 [`system-map.md`](./system-map.md) is what the pieces are, [`deployment.md`](./deployment.md) is
 where they run.
 
-**Status:** 2026-08-28.
+**Status:** 2026-10-01.
 
 ---
 
@@ -25,8 +25,9 @@ where they run.
 - **Dispatch, escalations and sign-off — Phase 5, below.** Staged in
   [`phase-5-roadmap.md`](./phase-5-roadmap.md), which is the current record of what shipped and
   what departed from this section's plan. Dispatch, the acknowledgement, the three issue types
-  and the signature ledger are shipped; live push to an open dashboard and the model as a second
-  detector are not — neither is on the MVP line below, which now runs end to end.
+  and the signature ledger are shipped, as is live push to an open dashboard (5b·2). The model is
+  a second detector per question (`concerns.py`); the protocol-wide judged path (5b·3) is not
+  built. The MVP line below runs end to end.
 
 ---
 
@@ -202,8 +203,8 @@ restores it when the smoke test fails.
 
 **Run on 2026-08-27.** `https://metafora-call.vercel.app` in front of `https://metafora.fly.dev`;
 the first call through it completed and persisted. `deployment.md` §3 is what is actually
-running. Still open: the concurrency measurement below — three simultaneous calls holding their
-latency, which is the number `MAX_CONCURRENT_SESSIONS` should be set from rather than guessed.
+running. The concurrency measurement — three simultaneous calls holding their latency — has since
+been run and held.
 
 **Done:** a stranger completes an interview on their phone · three at once hold their latency,
 and `MAX_CONCURRENT_SESSIONS` is set from what that showed rather than guessed · the row survives
