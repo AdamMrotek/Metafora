@@ -70,37 +70,6 @@
      of a side, and a gradient would give it one. */
   --px-neu:var(--n-400);
 }
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    color-scheme:dark;
-    --bg:var(--n-980); --surface:var(--n-950); --sunken:var(--n-900); --inset:var(--n-900);
-    --fg:var(--n-50); --fg-2:#c3d3d3; --fg-3:#9fb2b2; --fg-4:var(--n-400); --fg-inv:var(--n-980);
-    --line:rgba(255,255,255,.09); --line-soft:rgba(255,255,255,.05); --line-strong:rgba(255,255,255,.17);
-    --grad:linear-gradient(100deg,var(--t-300) 0%,var(--c-300) 100%);
-    --grad-bright:linear-gradient(100deg,var(--t-400) 0%,var(--c-400) 100%);
-    --accent:var(--t-300); --accent-fg:var(--t-300); --accent-on:var(--n-950);
-    --accent-soft:rgba(94,234,212,.11); --accent-line:rgba(94,234,212,.32);
-    --warn:var(--a-400); --warn-fg:var(--a-300);
-    --warn-soft:rgba(251,191,36,.1); --warn-line:rgba(251,191,36,.3);
-    --danger:var(--r-500); --danger-fg:var(--r-400);
-    --danger-soft:rgba(248,113,113,.11); --danger-line:rgba(248,113,113,.3);
-    --sw-1:#5eead4; --sw-2:#62e9e6; --sw-3:#67e8f9;
-    --sw-w1:#fbbf24; --sw-w2:#f59e0b;
-  }
-}
-:root[data-theme="dark"]{
-  color-scheme:dark;
-  --bg:var(--n-980); --surface:var(--n-950); --sunken:var(--n-900); --inset:var(--n-900);
-  --fg:var(--n-50); --fg-2:#c3d3d3; --fg-3:#9fb2b2; --fg-4:var(--n-400); --fg-inv:var(--n-980);
-  --line:rgba(255,255,255,.09); --line-soft:rgba(255,255,255,.05); --line-strong:rgba(255,255,255,.17);
-  --grad:linear-gradient(100deg,var(--t-300) 0%,var(--c-300) 100%);
-  --grad-bright:linear-gradient(100deg,var(--t-400) 0%,var(--c-400) 100%);
-  --accent:var(--t-300); --accent-fg:var(--t-300); --accent-on:var(--n-950);
-  --accent-soft:rgba(94,234,212,.11); --accent-line:rgba(94,234,212,.32);
-  --warn:var(--a-400); --warn-fg:var(--a-300);
-  --warn-soft:rgba(251,191,36,.1); --warn-line:rgba(251,191,36,.3);
-  --sw-1:#5eead4; --sw-2:#62e9e6; --sw-3:#67e8f9;
-}
 :root{--sweep:linear-gradient(100deg,var(--sw-1) 0%,var(--sw-2) 45%,var(--sw-3) 100%)}
 :root{--sweep-warn:linear-gradient(100deg,var(--sw-w1) 0%,var(--sw-w2) 100%)}
 
